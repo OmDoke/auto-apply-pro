@@ -1,0 +1,20 @@
+{
+  "name": "auto-apply-pro-backend",
+  "version": "1.0.0",
+  "description": "Backend engine for Universal Job Agent",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "auto-apply-pro": "file:..",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "puppeteer": "^22.6.0"
+  },
+  "devDependencies": {
+    "string-similarity": "^4.0.4"
+  }
+}

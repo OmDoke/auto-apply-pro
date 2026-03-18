@@ -1,0 +1,17 @@
+{
+  "name": "auto-apply-pro",
+  "version": "1.0.0",
+  "description": "An agentic job application suite that automates profile updates and job discovery across LinkedIn, Naukri, and Indeed. Built with a React.js control dashboard and a Node.js/Puppeteer automation engine.",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "npm run build --prefix frontend",
+    "start": "npm start --prefix backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

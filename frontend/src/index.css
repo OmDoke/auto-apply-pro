@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom CSS utility used in your App.tsx */
+.glass-panel {
+  @apply bg-slate-900/50 border border-slate-800 backdrop-blur-md shadow-xl;
+}
