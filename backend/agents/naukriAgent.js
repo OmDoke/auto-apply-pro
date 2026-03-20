@@ -13,6 +13,24 @@ if (fs.existsSync(answersPath)) {
     } catch(err) {}
 }
 
+const failedJobsPath = path.join(__dirname, '..', 'data', 'failed_jobs.json');
+const saveFailedJobs = (failedJobs) => {
+    if (failedJobs.length === 0) return;
+    try {
+        let existing = [];
+        if (fs.existsSync(failedJobsPath)) {
+            existing = JSON.parse(fs.readFileSync(failedJobsPath, 'utf8'));
+        }
+        const merged = [...existing, ...failedJobs];
+        fs.writeFileSync(failedJobsPath, JSON.stringify(merged, null, 2));
+        console.log(`Failed jobs saved to failed_jobs.json (total: ${merged.length})`);
+    } catch (e) {
+        console.log('Could not save failed_jobs.json:', e.message);
+    }
+};
+
+const MAX_APPLICATIONS = 50;
+
 const run = async () => {
     console.log('Naukri Agent Initializing...');
 
@@ -25,13 +43,13 @@ const run = async () => {
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1280,800']
     });
 
+    const failedJobs = [];
     let stopped = false;
     const saveAndExit = async () => {
         if (stopped) return;
         stopped = true;
-        console.log('Stop signal received. Closing browser...');
+        console.log('Stop signal received. Closing browser to abort current operations...');
         try { await browser.close(); } catch (_) {}
-        process.exit(0);
     };
     process.on('SIGINT', saveAndExit);
     process.on('SIGTERM', saveAndExit);
@@ -57,7 +75,7 @@ const run = async () => {
         const jobTitle = envTitle.includes(',') ? envTitle.split(',')[0].trim() : envTitle.trim();
         const jobLocation = 'Pune'; // Naukri location is hardcoded per user request via cityTypeGids
 
-        console.log(`Searching for: ${jobTitle} in ${jobLocation}`);
+        console.log(`Searching for: ${jobTitle} in ${jobLocation} (Max: ${MAX_APPLICATIONS} applications)`);
 
         const formattedTitle = encodeURIComponent(jobTitle);
         // User requested specific Naukri URL structure for React Developer in Pune
@@ -87,12 +105,39 @@ const run = async () => {
                 for (let i = 0; i < jobs.length; i++) {
                     if (stopped) break;
 
+                    if (jobsApplied >= MAX_APPLICATIONS) {
+                        console.log(`\nReached maximum application limit of ${MAX_APPLICATIONS}. Stopping further applications.`);
+                        stopped = true;
+                        break;
+                    }
+
                     console.log(`\nScanning job ${i + 1} on page ${currentPage}...`);
+                    let jobInfo = { title: 'Unknown Job', company: 'Unknown Company', url: 'Unknown URL', reason: '' };
+
                     try {
                         // Re-query list to avoid stale element references
                         const currentJobs = await page.$$('.srp-jobtuple-wrapper, .jobTuple');
                         if (!currentJobs[i]) continue;
                         
+                        jobInfo = await page.evaluate((el) => {
+                            const titleEl = el.querySelector('.title');
+                            const companyEl = el.querySelector('.comp-name');
+                            const urlEl = el.querySelector('a.title');
+                            return {
+                                title: titleEl ? titleEl.innerText.trim() : 'Unknown Job',
+                                company: companyEl ? companyEl.innerText.trim() : 'Unknown Company',
+                                url: urlEl ? urlEl.href : window.location.href
+                            };
+                        }, currentJobs[i]);
+
+                        // Skip restricted companies
+                        const restrictedCompanies = ['ht media', 'ht media labs', 'ht media lbas', 'ht labs', 'ht media group'];
+                        const normalizedCompany = jobInfo.company.toLowerCase().trim();
+                        if (restrictedCompanies.some(c => normalizedCompany.includes(c))) {
+                            console.log(`Notice: Skipping restricted company: ${jobInfo.company}`);
+                            continue;
+                        }
+
                         await currentJobs[i].hover();
                         await currentJobs[i].scrollIntoView?.();
                         await new Promise(r => setTimeout(r, 1000));
@@ -193,10 +238,22 @@ const run = async () => {
                                         console.log('Notice: Already applied to this job.');
                                     } else {
                                         console.log('Notice: Could not find an Apply button inside the new tab.');
+                                        failedJobs.push({
+                                            title: jobInfo.title,
+                                            company: jobInfo.company,
+                                            url: jobInfo.url,
+                                            reason: 'Could not find an Apply button'
+                                        });
                                     }
                                 }
                             } catch (e) {
                                 console.log('Error interacting with new tab:', e.message);
+                                failedJobs.push({
+                                    title: jobInfo.title,
+                                    company: jobInfo.company,
+                                    url: jobInfo.url,
+                                    reason: 'Tab interaction error: ' + e.message
+                                });
                             } finally {
                                 await newPage.close();
                                 // Focus back to main search page
@@ -205,9 +262,21 @@ const run = async () => {
                             }
                         } else {
                             console.log('Notice: Failed to open job details in a new tab.');
+                            failedJobs.push({
+                                title: jobInfo.title,
+                                company: jobInfo.company,
+                                url: jobInfo.url,
+                                reason: 'Failed to open job details in a new tab'
+                            });
                         }
                     } catch (err) {
                         console.log(`Error on job ${i + 1}:`, err.message);
+                        failedJobs.push({
+                            title: jobInfo.title,
+                            company: jobInfo.company,
+                            url: jobInfo.url || page.url(),
+                            reason: 'Exception: ' + err.message
+                        });
                     }
                 }
 
@@ -247,6 +316,7 @@ const run = async () => {
             console.log('Notice: Could not find job listings or page format changed on Naukri.');
         }
 
+        saveFailedJobs(failedJobs);
         console.log('Naukri Agent finished tasks.');
     } catch (e) {
         console.error('Naukri Agent Error during execution:', e);

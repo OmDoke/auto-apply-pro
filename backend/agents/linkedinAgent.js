@@ -272,10 +272,8 @@ const run = async () => {
     const saveAndExit = async () => {
         if (stopped) return;
         stopped = true;
-        console.log('Stop signal received. Saving state and closing browser...');
+        console.log('Stop signal received. Closing browser to abort current operations...');
         try { await browser.close(); } catch (_) {}
-        saveFailedJobs(failedJobs);
-        process.exit(0);
     };
     process.on('SIGINT', saveAndExit);
     process.on('SIGTERM', saveAndExit);
@@ -300,8 +298,9 @@ const run = async () => {
         const jobLocationEnv = process.env.FRONTEND_LOCATION || process.env.JOB_LOCATION || process.env.LOCATION || 'Remote';
         const jobTitle = jobTitleEnv;
         const jobLocation = jobLocationEnv;
+        const MAX_APPLICATIONS = 50;
 
-        console.log(`Searching for: ${jobTitle} in ${jobLocation}`);
+        console.log(`Searching for: ${jobTitle} in ${jobLocation} (Max: ${MAX_APPLICATIONS} applications)`);
 
         const searchUrl = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(jobTitle)}&location=${encodeURIComponent(jobLocation)}&f_AL=true`;
         console.log('Navigating to search results...');
@@ -332,7 +331,15 @@ const run = async () => {
                 for (let i = 0; i < jobs.length; i++) {
                     if (stopped) break;
 
+                    if (jobsApplied >= MAX_APPLICATIONS) {
+                        console.log(`\nReached maximum application limit of ${MAX_APPLICATIONS}. Stopping further applications.`);
+                        stopped = true;
+                        break;
+                    }
+
                     console.log(`\nSelecting job ${i + 1} on page ${currentPage}...`);
+                    
+                    let jobInfo = { title: 'Unknown Job', company: 'Unknown Company', url: 'Unknown URL' };
 
                     try {
                         const jobsList = await page.$$('.job-card-container');
@@ -354,7 +361,7 @@ const run = async () => {
                         }
 
                         // Get job info for tracking
-                        const jobInfo = await page.evaluate(() => {
+                        const fetchedInfo = await page.evaluate(() => {
                             const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .t-24');
                             const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, .t-16');
                             const url = window.location.href;
@@ -364,8 +371,17 @@ const run = async () => {
                                 url: url
                             };
                         });
+                        jobInfo = { ...jobInfo, ...fetchedInfo };
 
                         console.log(`  Job: "${jobInfo.title}" at ${jobInfo.company}`);
+
+                        // Skip restricted companies
+                        const restrictedCompanies = ['ht media', 'ht media labs', 'ht media lbas', 'ht labs', 'ht media group'];
+                        const normalizedCompany = jobInfo.company.toLowerCase().trim();
+                        if (restrictedCompanies.some(c => normalizedCompany.includes(c))) {
+                            console.log(`  Skipping restricted company: ${jobInfo.company}`);
+                            continue;
+                        }
 
                         // Retry loop: attempt up to 2 times
                         const maxRetries = 2;
@@ -404,6 +420,12 @@ const run = async () => {
 
                     } catch (e) {
                         console.log(`  Error processing job ${i + 1}:`, e.message);
+                        failedJobs.push({
+                            title: jobInfo.title,
+                            company: jobInfo.company,
+                            url: jobInfo.url || page.url(),
+                            reason: 'Exception: ' + e.message
+                        });
                         await discardModal(page);
                     }
                 }
@@ -477,8 +499,9 @@ const run = async () => {
                 if (!clickedNext) {
                     try {
                         const currentUrl = page.url();
-                        const startParam = (currentPage) * 25;
-                        const nextStart  = (currentPage + 1) * 25;
+                        // currentPage is 1-indexed. Next page start index should be currentPage * 25.
+                        // (e.g. Page 2 is start=25, Page 3 is start=50)
+                        const nextStart  = (currentPage) * 25;
                         let nextUrl;
                         if (currentUrl.includes('start=')) {
                             nextUrl = currentUrl.replace(/start=\d+/, `start=${nextStart}`);
