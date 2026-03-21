@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test-qa": "node test-qa.js"
   },
   "dependencies": {
     "auto-apply-pro": "file:..",
@@ -15,6 +16,9 @@
     "puppeteer": "^22.6.0"
   },
   "devDependencies": {
+    "@langchain/groq": "^1.1.5",
+    "pdf-parse": "^1.1.1",
+    "socket.io": "^4.8.3",
     "string-similarity": "^4.0.4"
   }
 }

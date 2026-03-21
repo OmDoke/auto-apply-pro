@@ -74,8 +74,8 @@ const fillFormFields = async (page, answers) => {
     });
 
     for (const { idx, questionText } of formGroups) {
-        // Smart answer — runs on Node side so string-similarity works
-        const answer = getAnswer(questionText, answers);
+        // Smart answer — async: rules → fuzzy → Groq AI fallback
+        const answer = await getAnswer(questionText, answers);
         if (!answer) continue;
 
         // Inject the answer into the correct input type inside that group
@@ -209,38 +209,70 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
         // B) Fill all text/select/radio fields from answers.json
         await fillFormFields(page, presetAnswers);
 
-        // C) Try to click primary button
+        // C) Identify and click the best action button
         const actionButtons = await page.$$('.artdeco-button--primary');
         let clicked = false;
+        let btnToClick = null;
+        let btnType = '';
 
+        // Extract button info for better decision making
+        const buttons = [];
         for (const btn of actionButtons) {
-            const btnText = await page.evaluate(el => el.textContent.trim().toLowerCase(), btn);
+            const text = await page.evaluate(el => el.textContent.trim().toLowerCase(), btn);
+            buttons.push({ btn, text });
+        }
 
-            if (btnText.includes('submit application')) {
-                console.log('  Submitting application...');
-                await btn.click();
-                await new Promise(r => setTimeout(r, 2000));
-                applicationSubmitted = true;
-                clicked = true;
+        // Priority list: Submit > Review > Next/Continue/Next step
+        // "Apply" button inside the modal is usually the same as "Submit application"
+        const submitBtn = buttons.find(b => b.text === 'apply' || b.text === 'submit application' || b.text.includes('submit application'));
+        const reviewBtn = buttons.find(b => b.text.includes('review'));
+        const nextBtn = buttons.find(b => b.text.includes('next') || b.text.includes('continue'));
 
-                // Dismiss success dialog
-                const dismissBtn = await page.$('button[aria-label="Dismiss"]');
-                if (dismissBtn) await dismissBtn.click();
-                break;
-
-            } else if (btnText.includes('next') || btnText.includes('review') || btnText.includes('continue')) {
-                console.log(`  Clicking "${btnText}"...`);
-                await btn.click();
-                clicked = true;
-                await new Promise(r => setTimeout(r, 1500));
-
-                // Check for validation errors after clicking Next
-                const errors = await page.$$('.artdeco-inline-feedback--error');
-                if (errors.length > 0) {
-                    console.log(`  Validation errors on step (attempt ${attemptNum}).`);
-                    return 'failed'; // signal failure so outer retry loop kicks in
+        if (submitBtn) {
+            btnToClick = submitBtn.btn;
+            btnType = 'submit';
+            
+            // User requested scrolling on the review/submit page
+            console.log('  Reviewing application details (scrolling)...');
+            await page.evaluate(() => {
+                const modal = document.querySelector('.jobs-easy-apply-modal__content, .artdeco-modal__content');
+                if (modal) {
+                    modal.scrollTo({ top: modal.scrollHeight, behavior: 'smooth' });
                 }
-                break;
+            });
+            await new Promise(r => setTimeout(r, 1500));
+            
+            console.log('  Submitting application...');
+            await btnToClick.click();
+            await new Promise(r => setTimeout(r, 2500));
+            applicationSubmitted = true;
+            clicked = true;
+
+            // Dismiss success dialog
+            const dismissBtn = await page.$('button[aria-label="Dismiss"]');
+            if (dismissBtn) await dismissBtn.click();
+
+        } else if (reviewBtn) {
+            btnToClick = reviewBtn.btn;
+            btnType = 'review';
+            console.log('  Clicking "Review"...');
+            await btnToClick.click();
+            clicked = true;
+            await new Promise(r => setTimeout(r, 1500));
+
+        } else if (nextBtn) {
+            btnToClick = nextBtn.btn;
+            btnType = 'next';
+            console.log(`  Clicking "${nextBtn.text}"...`);
+            await btnToClick.click();
+            clicked = true;
+            await new Promise(r => setTimeout(r, 1500));
+
+            // Check for validation errors after clicking Next
+            const errors = await page.$$('.artdeco-inline-feedback--error');
+            if (errors.length > 0) {
+                console.log(`  Validation errors on step (attempt ${attemptNum}).`);
+                return 'failed';
             }
         }
 
@@ -315,14 +347,14 @@ const run = async () => {
                 await page.waitForSelector('.job-card-container', { timeout: 10000 });
                 console.log(`Job listings loaded for page ${currentPage}.`);
 
-                // Scroll to lazily load all cards
                 for (let i = 0; i < 5; i++) {
                     if (stopped) break;
                     await page.evaluate(() => {
                         const pane = document.querySelector('.jobs-search-results-list');
                         if (pane) pane.scrollTop += 600;
                     });
-                    await new Promise(r => setTimeout(r, 1000));
+                    // Random delay between 800ms and 1500ms
+                    await new Promise(r => setTimeout(r, 800 + Math.random() * 700));
                 }
 
                 const jobs = await page.$$('.job-card-container');
@@ -346,9 +378,10 @@ const run = async () => {
                         if (!jobsList[i]) continue;
 
                         await page.evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), jobsList[i]);
-                        await new Promise(r => setTimeout(r, 1000));
+                        await new Promise(r => setTimeout(r, 800 + Math.random() * 500));
                         await jobsList[i].click();
-                        await new Promise(r => setTimeout(r, 3000));
+                        // Wait a bit longer randomized delay to simulate human reading
+                        await new Promise(r => setTimeout(r, 2500 + Math.random() * 1500));
 
                         // Skip if already applied
                         const appliedBadge = await page.$('.artdeco-inline-feedback--success');
@@ -436,14 +469,14 @@ const run = async () => {
                 console.log(`\nAttempting to go to page ${currentPage + 1}...`);
                 let clickedNext = false;
 
-                // Scroll pagination into view first
+                // Scroll pagination into view first with smooth tracking
                 await page.evaluate(() => {
                     const pagination = document.querySelector(
                         '.artdeco-pagination, [data-test-pagination-page-btn]'
                     );
                     if (pagination) pagination.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 });
-                await new Promise(r => setTimeout(r, 1000));
+                await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
 
                 // Strategy 1: click numbered page button matching currentPage + 1
                 try {

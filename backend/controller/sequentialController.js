@@ -1,6 +1,8 @@
-// backend/controller/sequentialController.js
 const { fork } = require('child_process');
 const path = require('path');
+const { EventEmitter } = require('events');
+
+const engineEvents = new EventEmitter();
 
 let activeProcess = null;
 
@@ -13,13 +15,16 @@ let currentState = {
 // Use an event emitter format or simply export the state/run sequence
 const addLog = (message) => {
     const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-    currentState.logs.push(`[${timestamp}] ${message}`);
+    const logStr = `[${timestamp}] ${message}`;
+    currentState.logs.push(logStr);
     console.log(message);
+    engineEvents.emit('log', logStr);
 };
 
 const setStatus = (status, agent = null) => {
     currentState.status = status;
     if (agent) currentState.currentAgent = agent;
+    engineEvents.emit('statusUpdate', currentState);
 };
 
 const runAgent = async (agentName, scriptPath, prefs = {}) => {
@@ -132,4 +137,4 @@ const stopSequence = () => {
 
 const getStatus = () => currentState;
 
-module.exports = { runSequence, runSingleAgent, stopSequence, getStatus };
+module.exports = { runSequence, runSingleAgent, stopSequence, getStatus, engineEvents };

@@ -161,3 +161,15 @@ Thumbs.db
 .env.example
 
 /project-context.md
+
+# Testing and debug files
+debug-output.txt
+devug-output.txt
+debug.js
+debuj.js
+test-pdf.js
+backend/test-qa.js
+backend/qa_logs.txt
+backend/test-pdf-invoke.js
+backend/test-pdf-log.txt
+backend/test-pdf-out.txt

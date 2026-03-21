@@ -1,6 +1,7 @@
 'use strict';
 
 const stringSimilarity = require('string-similarity');
+const { getAIAnswer } = require('./resumeQA');
 
 // ---------------------------------------------------------------------------
 // Normalise a raw question string for consistent comparison
@@ -24,6 +25,12 @@ const SKILL_TOKENS = [
     'mongodb', 'redis', 'docker', 'kubernetes', 'aws', 'azure', 'gcp',
     'c', 'cpp', 'c++', 'golang', 'go', 'rust', 'kotlin', 'swift',
     'html', 'css', 'tailwind', 'graphql', 'git', 'linux', 'bash',
+    'ruby', 'php', 'c#', 'csharp', '.net', 'dotnet', 'scala', 'dart',
+    'flutter', 'react native', 'android', 'ios', 'machine learning',
+    'ml', 'artificial intelligence', 'ai', 'data science', 'pandas',
+    'numpy', 'tensorflow', 'pytorch', 'graphql', 'next.js', 'nextjs',
+    'nest', 'nestjs', 'spring boot', 'kafka', 'rabbitmq', 'jenkins',
+    'ci/cd', 'terraform', 'ansible', 'elasticsearch'
 ];
 
 // ---------------------------------------------------------------------------
@@ -145,6 +152,54 @@ const ruleBasedMatch = (normalizedQ, userData) => {
         return String(userData['race'] ?? 'Decline to self-identify');
     }
 
+    // Education / Degree
+    if (
+        normalizedQ.includes('degree') ||
+        normalizedQ.includes('bachelor') ||
+        normalizedQ.includes('master') ||
+        normalizedQ.includes('phd') ||
+        normalizedQ.includes('graduation')
+    ) {
+        const val = userData['education'] ?? userData['degree'] ?? 'Yes';
+        return String(val);
+    }
+
+    // Languages (e.g. English proficiency)
+    if (
+        normalizedQ.includes('english') ||
+        normalizedQ.includes('language') ||
+        normalizedQ.includes('fluent') ||
+        normalizedQ.includes('proficiency')
+    ) {
+        const val = userData['english'] ?? userData['language'] ?? 'Professional / Fluent';
+        return String(val);
+    }
+
+    // Security Clearance
+    if (normalizedQ.includes('clearance') || normalizedQ.includes('security clearance')) {
+        const val = userData['clearance'] ?? 'No';
+        return String(val);
+    }
+
+    // Website / Portfolio / Github / LinkedIn
+    if (
+        normalizedQ.includes('portfolio') ||
+        normalizedQ.includes('website') ||
+        normalizedQ.includes('github') ||
+        normalizedQ.includes('linkedin') ||
+        normalizedQ.includes('link') ||
+        normalizedQ.includes('url')
+    ) {
+        if (normalizedQ.includes('github')) return String(userData['github'] ?? userData['portfolio'] ?? '');
+        if (normalizedQ.includes('linkedin')) return String(userData['linkedin'] ?? userData['portfolio'] ?? '');
+        return String(userData['portfolio'] ?? userData['website'] ?? userData['link'] ?? '');
+    }
+
+    // Pronouns
+    if (normalizedQ.includes('pronoun')) {
+        return String(userData['pronouns'] ?? 'He/Him');
+    }
+
     return null;
 };
 
@@ -178,9 +233,9 @@ const getBestFuzzyMatch = (normalizedQ, userData) => {
 };
 
 // ---------------------------------------------------------------------------
-// Main exported function
+// Main exported function — NOW ASYNC (supports AI fallback)
 // ---------------------------------------------------------------------------
-const getAnswer = (questionText, userData) => {
+const getAnswer = async (questionText, userData) => {
     if (!questionText || !userData) return null;
 
     const normalized = normalizeText(questionText);
@@ -192,6 +247,10 @@ const getAnswer = (questionText, userData) => {
     // 2. Fuzzy matching (flexible fallback)
     const fuzzyAnswer = getBestFuzzyMatch(normalized, userData);
     if (fuzzyAnswer !== null) return fuzzyAnswer;
+
+    // 3. AI fallback via Groq + resume (slowest but most intelligent)
+    const aiAnswer = await getAIAnswer(questionText);
+    if (aiAnswer !== null) return aiAnswer;
 
     return null;
 };

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import { io, Socket } from 'socket.io-client';
 import { Play, Square, CheckCircle2, AlertCircle, Clock, Terminal, ChevronRight, ExternalLink, ArrowLeft, Trash2, Link } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
 
 type AgentStatus = 'Idle' | 'Running' | 'Success' | 'Failed';
 
@@ -176,14 +178,7 @@ function App() {
   const [showManualReview, setShowManualReview] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  const fetchStatus = async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/status`);
-      setState(res.data);
-    } catch (error) {
-      console.error('Error fetching status:', error);
-    }
-  };
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   const fetchFailedCount = async () => {
     try {
@@ -193,19 +188,29 @@ function App() {
   };
 
   useEffect(() => {
-    fetchStatus();
     fetchFailedCount();
-  }, []);
+    
+    const newSocket = io(SOCKET_URL);
+    setSocket(newSocket);
 
-  useEffect(() => {
-    if (state.status === 'Running') {
-      const interval = setInterval(() => { fetchStatus(); }, 2000);
-      return () => clearInterval(interval);
-    }
-    if (state.status === 'Success' || state.status === 'Failed') {
-      fetchFailedCount(); // refresh failed count after a run ends
-    }
-  }, [state.status]);
+    newSocket.on('statusUpdate', (newStatus: SystemState) => {
+      setState(newStatus);
+      if (newStatus.status === 'Success' || newStatus.status === 'Failed') {
+        fetchFailedCount();
+      }
+    });
+
+    newSocket.on('log', (logMessage: string) => {
+      setState(prev => ({
+        ...prev,
+        logs: [...prev.logs, logMessage]
+      }));
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (logEndRef.current) {
@@ -215,31 +220,16 @@ function App() {
 
   const handleStart = async () => {
     if (state.status === 'Running') return;
-    try {
-      await axios.post(`${API_BASE}/start`, prefs);
-      fetchStatus();
-    } catch (error) {
-      console.error('Error starting sequence:', error);
-    }
+    socket?.emit('start', prefs);
   };
 
   const handleStartAgent = async (agentId: string) => {
     if (state.status === 'Running') return;
-    try {
-      await axios.post(`${API_BASE}/start`, { ...prefs, agentId });
-      fetchStatus();
-    } catch (error) {
-      console.error('Error starting agent:', error);
-    }
+    socket?.emit('start', { ...prefs, agentId });
   };
 
   const handleStop = async () => {
-    try {
-      await axios.post(`${API_BASE}/stop`);
-      fetchStatus();
-    } catch (error) {
-      console.error('Error stopping processes:', error);
-    }
+    socket?.emit('stop');
   };
 
   const getStatusIcon = (agentId: string) => {

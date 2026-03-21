@@ -92,11 +92,11 @@ const run = async () => {
                 await page.waitForSelector('.srp-jobtuple-wrapper, .jobTuple', { timeout: 10000 });
                 console.log(`Job listings loaded for page ${currentPage}.`);
 
-                // Scroll to lazily load cards
+                // Scroll to lazily load cards with random delays
                 for (let i = 0; i < 5; i++) {
                     if (stopped) break;
                     await page.evaluate(() => { window.scrollBy(0, 800); });
-                    await new Promise(r => setTimeout(r, 1000));
+                    await new Promise(r => setTimeout(r, 800 + Math.random() * 600));
                 }
 
                 const jobs = await page.$$('.srp-jobtuple-wrapper, .jobTuple');
@@ -140,7 +140,7 @@ const run = async () => {
 
                         await currentJobs[i].hover();
                         await currentJobs[i].scrollIntoView?.();
-                        await new Promise(r => setTimeout(r, 1000));
+                        await new Promise(r => setTimeout(r, 800 + Math.random() * 500));
 
                         // Check if already applied from the list view before clicking
                         const listAppliedText = await page.evaluate(el => el.innerText.toLowerCase(), currentJobs[i]);
@@ -172,7 +172,7 @@ const run = async () => {
                         if (newPage) {
                             console.log('Navigated to job details in new tab.');
                             await newPage.bringToFront();
-                            await new Promise(r => setTimeout(r, 4000));
+                            await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
 
                             try {
                                 console.log('Searching for Apply button...');
@@ -191,43 +191,41 @@ const run = async () => {
                                     await new Promise(r => setTimeout(r, 4000));
                                     jobsApplied++;
 
-                                    // Handle chatbot / questionnaire
+                                    // Handle chatbot / questionnaire using Node-side getAnswer (supports AI fallback)
                                     const hasQuestions = await newPage.$('.chatbot, .bot-container, .layer-wrap');
                                     if (hasQuestions) {
                                         console.log('Additional questions detected. Attempting to answer...');
-                                        await newPage.evaluate(async (ans) => {
-                                            const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"]'));
-                                            for (let input of inputs) {
-                                                let questionText = '';
-                                                const msgBubbles = Array.from(document.querySelectorAll('.msg-content, .botMsg'));
-                                                if (msgBubbles.length > 0) {
-                                                    questionText = msgBubbles[msgBubbles.length - 1].innerText.toLowerCase();
-                                                }
+                                        // Pull all chat question bubbles from the page
+                                        const chatQuestions = await newPage.evaluate(() => {
+                                            const bubbles = Array.from(document.querySelectorAll('.msg-content, .botMsg'));
+                                            return bubbles.map(b => b.innerText || '');
+                                        });
 
-                                                let bestMatch = '0';
-                                                if (questionText.includes('salary') || questionText.includes('ctc') || questionText.includes('lpa')) {
-                                                    bestMatch = ans['salary'] ?? '0';
-                                                } else if (questionText.includes('experience') || questionText.includes('years')) {
-                                                    bestMatch = ans['experience'] ?? '0';
-                                                } else if (questionText.includes('notice') || questionText.includes('joining')) {
-                                                    bestMatch = ans['notice period'] ?? 'Immediate';
-                                                } else if (questionText.includes('relocate')) {
-                                                    bestMatch = ans['relocate'] ?? 'Yes';
-                                                }
+                                        for (const questionText of chatQuestions) {
+                                            if (!questionText.trim()) continue;
+                                            // Use full getAnswer (rules → fuzzy → AI)
+                                            const bestMatch = await getAnswer(questionText, presetAnswers) || '0';
 
-                                                input.value = bestMatch;
-                                                input.dispatchEvent(new Event('input', { bubbles: true }));
-                                            }
-
-                                            const submitBtns = Array.from(document.querySelectorAll('button'));
-                                            for (let btn of submitBtns) {
-                                                if (btn.innerText && (btn.innerText.toLowerCase().includes('save') || btn.innerText.toLowerCase().includes('submit') || btn.innerText.toLowerCase().includes('send'))) {
-                                                    btn.click();
-                                                    break;
+                                            // Type and submit the answer in the chat input
+                                            await newPage.evaluate((answer) => {
+                                                const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"]'));
+                                                for (const input of inputs) {
+                                                    if (!input.value) {
+                                                        input.value = answer;
+                                                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                                                    }
                                                 }
-                                            }
-                                        }, presetAnswers);
-                                        await new Promise(r => setTimeout(r, 2000));
+                                                const submitBtns = Array.from(document.querySelectorAll('button'));
+                                                for (const btn of submitBtns) {
+                                                    if (btn.innerText && (btn.innerText.toLowerCase().includes('save') || btn.innerText.toLowerCase().includes('submit') || btn.innerText.toLowerCase().includes('send'))) {
+                                                        btn.click();
+                                                        break;
+                                                    }
+                                                }
+                                            }, bestMatch);
+                                            await new Promise(r => setTimeout(r, 1200));
+                                        }
+
                                     }
                                 } else {
                                     const alreadyApplied = await newPage.evaluate(() => {
@@ -299,7 +297,7 @@ const run = async () => {
                         clickedNext = true;
                         currentPage++;
                         console.log(`Navigating to Page ${currentPage}...`);
-                        await new Promise(r => setTimeout(r, 5000)); // wait for page load
+                        await new Promise(r => setTimeout(r, 4000 + Math.random() * 2000)); // wait for page load
                     }
                 } catch (e) {
                     console.log('Failed to click Next page:', e.message);
