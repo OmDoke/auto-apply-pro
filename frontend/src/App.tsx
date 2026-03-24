@@ -173,7 +173,7 @@ function App() {
     logs: []
   });
 
-  const [prefs, setPrefs] = useState({ jobTitle: 'Software Engineer', location: 'Bangalore' });
+  const [prefs, setPrefs] = useState({ jobTitle: 'Software Engineer', location: 'Pune' });
   const [failedCount, setFailedCount] = useState(0);
   const [showManualReview, setShowManualReview] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
