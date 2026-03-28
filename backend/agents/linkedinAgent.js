@@ -62,20 +62,35 @@ const discardModal = async (page) => {
 const fillFormFields = async (page, answers) => {
     if (Object.keys(answers).length === 0) return;
 
-    // Collect all form groups and their label texts in the browser
+    // Collect all form groups, label texts, and available options for dropdowns/radios
     const formGroups = await page.evaluate(() => {
         const groups = Array.from(document.querySelectorAll(
             '.jobs-easy-apply-form-section__grouping, .fb-dash-form-element, .jobs-easy-apply-form-element__fields'
         ));
         return groups.map((g, idx) => {
             const labelEl = g.querySelector('label, .fb-dash-form-element__label, legend');
-            return { idx, questionText: labelEl ? labelEl.innerText : '' };
-        }).filter(g => g.questionText.trim() !== '');
+            let type = 'text';
+            let options = [];
+            
+            const selectEl = g.querySelector('select');
+            if (selectEl) {
+                type = 'select';
+                options = Array.from(selectEl.options).filter(o => o.value && !o.text.toLowerCase().includes('select')).map(o => o.text.trim());
+            }
+            
+            const radioEls = Array.from(g.querySelectorAll('label'));
+            if (!selectEl && radioEls.length > 0 && g.querySelector('input[type="radio"]')) {
+                type = 'radio';
+                options = radioEls.map(r => r.innerText.trim());
+            }
+
+            return { idx, questionText: labelEl ? labelEl.innerText.trim() : '', type, options };
+        }).filter(g => g.questionText !== '');
     });
 
-    for (const { idx, questionText } of formGroups) {
-        // Smart answer — async: rules → fuzzy → Groq AI fallback
-        const answer = await getAnswer(questionText, answers);
+    for (const { idx, questionText, type, options } of formGroups) {
+        // Smart answer — async: rules → fuzzy → Groq AI fallback (with options context)
+        const answer = await getAnswer(questionText, answers, { type, options });
         if (!answer) continue;
 
         // Inject the answer into the correct input type inside that group
@@ -121,7 +136,7 @@ const fillFormFields = async (page, answers) => {
             // Radio buttons
             const radioLabels = Array.from(group.querySelectorAll('label'));
             for (const rLabel of radioLabels) {
-                if (rLabel.innerText.toLowerCase().includes(answer.toLowerCase())) {
+                if (rLabel.innerText.toLowerCase().trim() === answer.toLowerCase().trim() || rLabel.innerText.toLowerCase().includes(answer.toLowerCase())) {
                     rLabel.click();
                     break;
                 }
@@ -134,8 +149,11 @@ const fillFormFields = async (page, answers) => {
 
 // Helper: try selecting resume by name, then fall back to file upload
 const handleResumeStep = async (page) => {
-    // Try to select named resume 'onkar_doke_7745042879'
-    const targetResume = 'onkar_doke_7745042879';
+    // Read resume name from env (RESUME_NAME) or answers.json 'resume name' key
+    const targetResume = process.env.RESUME_NAME || presetAnswers['resume name'] || '';
+    if (!targetResume) {
+        console.log('  No resume name configured (RESUME_NAME env or "resume name" in answers.json). Skipping named selection.');
+    } else {
     const resumeSelected = await page.evaluate((resumeName) => {
         const allEls = Array.from(document.querySelectorAll('label, div, span, h3, a, button'));
         for (const el of allEls) {
@@ -159,6 +177,7 @@ const handleResumeStep = async (page) => {
         console.log(`Selected named resume: ${targetResume}`);
         return;
     }
+    } // end if targetResume
 
     // Fallback: file upload
     const fileInputs = await page.$$('input[type="file"]');
@@ -259,6 +278,13 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
             await btnToClick.click();
             clicked = true;
             await new Promise(r => setTimeout(r, 1500));
+
+            // Check for validation errors after clicking Review
+            const reviewErrors = await page.$$('.artdeco-inline-feedback--error');
+            if (reviewErrors.length > 0) {
+                console.log(`  Validation errors on step after Review (attempt ${attemptNum}).`);
+                return 'failed';
+            }
 
         } else if (nextBtn) {
             btnToClick = nextBtn.btn;

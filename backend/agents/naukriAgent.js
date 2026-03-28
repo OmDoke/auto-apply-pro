@@ -189,43 +189,85 @@ const run = async () => {
                                     await applyBtn.click();
                                     console.log('Successfully clicked Apply!');
                                     await new Promise(r => setTimeout(r, 4000));
-                                    jobsApplied++;
 
-                                    // Handle chatbot / questionnaire using Node-side getAnswer (supports AI fallback)
+                                    // Verify application was accepted before counting it
+                                    const applyConfirmed = await newPage.evaluate(() => {
+                                        const body = document.body.innerText.toLowerCase();
+                                        return (
+                                            body.includes('application submitted') ||
+                                            body.includes('applied successfully') ||
+                                            body.includes('your application has been sent') ||
+                                            body.includes('thank you for applying') ||
+                                            body.includes('you have applied')
+                                        );
+                                    });
+
+                                    if (applyConfirmed) {
+                                        jobsApplied++;
+                                        console.log(`  ✓ Application confirmed. Total so far: ${jobsApplied}`);
+                                    } else {
+                                        console.log('  ! Apply clicked but no confirmation found — not counting as applied.');
+                                        failedJobs.push({
+                                            title: jobInfo.title,
+                                            company: jobInfo.company,
+                                            url: jobInfo.url,
+                                            reason: 'Apply clicked but no success confirmation detected'
+                                        });
+                                    }
+
+                                    // Handle chatbot / questionnaire — iterative: wait for each question
                                     const hasQuestions = await newPage.$('.chatbot, .bot-container, .layer-wrap');
                                     if (hasQuestions) {
                                         console.log('Additional questions detected. Attempting to answer...');
-                                        // Pull all chat question bubbles from the page
-                                        const chatQuestions = await newPage.evaluate(() => {
-                                            const bubbles = Array.from(document.querySelectorAll('.msg-content, .botMsg'));
-                                            return bubbles.map(b => b.innerText || '');
-                                        });
+                                        const MAX_CHAT_STEPS = 15;
+                                        let chatStep = 0;
 
-                                        for (const questionText of chatQuestions) {
-                                            if (!questionText.trim()) continue;
-                                            // Use full getAnswer (rules → fuzzy → AI)
+                                        while (chatStep < MAX_CHAT_STEPS) {
+                                            chatStep++;
+                                            try {
+                                                await newPage.waitForFunction(
+                                                    () => document.querySelectorAll('.msg-content, .botMsg').length > 0,
+                                                    { timeout: 5000 }
+                                                );
+                                            } catch (_) { break; }
+
+                                            const questionText = await newPage.evaluate(() => {
+                                                const bubbles = Array.from(document.querySelectorAll('.msg-content, .botMsg'));
+                                                const last = bubbles[bubbles.length - 1];
+                                                return last ? (last.innerText || '') : '';
+                                            });
+
+                                            if (!questionText.trim()) break;
+                                            console.log(`  Chat Q${chatStep}: "${questionText.trim()}"`);
+
                                             const bestMatch = await getAnswer(questionText, presetAnswers) || '0';
+                                            console.log(`  Chat A${chatStep}: "${bestMatch}"`);
 
-                                            // Type and submit the answer in the chat input
                                             await newPage.evaluate((answer) => {
-                                                const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="number"]'));
-                                                for (const input of inputs) {
-                                                    if (!input.value) {
-                                                        input.value = answer;
-                                                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                                                    }
+                                                const inputs = Array.from(document.querySelectorAll(
+                                                    'input[type="text"], input[type="number"], textarea'
+                                                ));
+                                                const emptyInput = inputs.find(inp => !inp.value);
+                                                if (emptyInput) {
+                                                    emptyInput.value = answer;
+                                                    emptyInput.dispatchEvent(new Event('input', { bubbles: true }));
                                                 }
                                                 const submitBtns = Array.from(document.querySelectorAll('button'));
                                                 for (const btn of submitBtns) {
-                                                    if (btn.innerText && (btn.innerText.toLowerCase().includes('save') || btn.innerText.toLowerCase().includes('submit') || btn.innerText.toLowerCase().includes('send'))) {
+                                                    const t = btn.innerText ? btn.innerText.toLowerCase() : '';
+                                                    if (t.includes('save') || t.includes('submit') || t.includes('send') || t.includes('next')) {
                                                         btn.click();
                                                         break;
                                                     }
                                                 }
                                             }, bestMatch);
-                                            await new Promise(r => setTimeout(r, 1200));
-                                        }
 
+                                            await new Promise(r => setTimeout(r, 1500));
+
+                                            const chatClosed = await newPage.$('.chatbot, .bot-container, .layer-wrap')
+                                                .then(el => !el).catch(() => true);
+                                            if (chatClosed) break;
+                                        }
                                     }
                                 } else {
                                     const alreadyApplied = await newPage.evaluate(() => {

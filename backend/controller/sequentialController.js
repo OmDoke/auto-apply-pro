@@ -4,7 +4,8 @@ const { EventEmitter } = require('events');
 
 const engineEvents = new EventEmitter();
 
-let activeProcess = null;
+let activeProcesses = [];
+const MAX_LOG_ENTRIES = 500;
 
 let currentState = {
     status: 'Idle',
@@ -17,6 +18,9 @@ const addLog = (message) => {
     const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
     const logStr = `[${timestamp}] ${message}`;
     currentState.logs.push(logStr);
+    if (currentState.logs.length > MAX_LOG_ENTRIES) {
+        currentState.logs = currentState.logs.slice(-MAX_LOG_ENTRIES);
+    }
     console.log(message);
     engineEvents.emit('log', logStr);
 };
@@ -44,7 +48,7 @@ const runAgent = async (agentName, scriptPath, prefs = {}) => {
             stdio: 'pipe' 
         });
         
-        activeProcess = childProcess;
+        activeProcesses.push(childProcess);
 
         childProcess.stdout.on('data', (data) => {
             const lines = data.toString().split('\n').filter(line => line.trim() !== '');
@@ -57,7 +61,7 @@ const runAgent = async (agentName, scriptPath, prefs = {}) => {
         });
 
         childProcess.on('close', (code) => {
-            activeProcess = null;
+            activeProcesses = activeProcesses.filter(p => p !== childProcess);
             if (code === 0) {
                 addLog(`✓ ${agentName} completed successfully.`);
                 resolve();
@@ -75,18 +79,14 @@ const runSequence = async (prefs = {}) => {
         return;
     }
 
-    currentState.logs = []; // clear previous logs
     setStatus('Running', 'LinkedIn Agent');
+    addLog('─────────────────────────────────────────────────');
     addLog('--- Starting Universal Job Agent Sequence ---');
 
     try {
         await runAgent('LinkedIn Agent', path.join(__dirname, '..', 'agents', 'linkedinAgent.js'), prefs);
         
-        setStatus('Running', 'Naukri Agent');
         await runAgent('Naukri Agent', path.join(__dirname, '..', 'agents', 'naukriAgent.js'), prefs);
-        
-        setStatus('Running', 'Aggregator Agent');
-        await runAgent('Aggregator Agent', path.join(__dirname, '..', 'agents', 'aggregatorAgent.js'), prefs);
 
         setStatus('Success');
         addLog('--- Sequence Completed Successfully ---');
@@ -102,7 +102,7 @@ const runSingleAgent = async (agentId, prefs = {}) => {
         return;
     }
 
-    currentState.logs = [];
+    addLog('─────────────────────────────────────────────────');
     addLog(`--- Starting Single Agent: ${agentId} ---`);
 
     try {
@@ -126,10 +126,10 @@ const runSingleAgent = async (agentId, prefs = {}) => {
 };
 
 const stopSequence = () => {
-    if (activeProcess) {
+    if (activeProcesses.length > 0) {
         addLog('Interrupting process...');
-        activeProcess.kill('SIGINT');
-        activeProcess = null;
+        activeProcesses.forEach(p => { try { p.kill('SIGINT'); } catch (_) {} });
+        activeProcesses = [];
     }
     setStatus('Idle');
     addLog('--- Automation Stopped by User ---');

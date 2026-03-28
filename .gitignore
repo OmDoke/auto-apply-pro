@@ -158,7 +158,6 @@ Thumbs.db
 *.swp
 *.swo
 
-.env.example
 
 /project-context.md
 
@@ -173,3 +172,6 @@ backend/qa_logs.txt
 backend/test-pdf-invoke.js
 backend/test-pdf-log.txt
 backend/test-pdf-out.txt
+
+# AI agent tooling (not part of the deployable app)
+.agent/

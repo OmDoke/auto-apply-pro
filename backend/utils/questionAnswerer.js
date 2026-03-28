@@ -28,7 +28,7 @@ const SKILL_TOKENS = [
     'ruby', 'php', 'c#', 'csharp', '.net', 'dotnet', 'scala', 'dart',
     'flutter', 'react native', 'android', 'ios', 'machine learning',
     'ml', 'artificial intelligence', 'ai', 'data science', 'pandas',
-    'numpy', 'tensorflow', 'pytorch', 'graphql', 'next.js', 'nextjs',
+    'numpy', 'tensorflow', 'pytorch', 'next.js', 'nextjs',
     'nest', 'nestjs', 'spring boot', 'kafka', 'rabbitmq', 'jenkins',
     'ci/cd', 'terraform', 'ansible', 'elasticsearch'
 ];
@@ -42,7 +42,8 @@ const ruleBasedMatch = (normalizedQ, userData) => {
     // → find the skill token in the question, return that skill's value
     if (normalizedQ.includes('experience') || normalizedQ.includes('years')) {
         for (const skill of SKILL_TOKENS) {
-            const pattern = new RegExp(`\\b${skill}\\b`);
+            const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`\\b${escaped}\\b`);
             if (pattern.test(normalizedQ)) {
                 // look for a matching key in userData
                 const skillKey = Object.keys(userData).find(k =>
@@ -118,7 +119,7 @@ const ruleBasedMatch = (normalizedQ, userData) => {
 
     // Notice period
     if (normalizedQ.includes('notice') || normalizedQ.includes('joining')) {
-        const val = userData['notice period'] ?? userData['notice'] ?? 'Immediate';
+        const val = userData['notice period'] ?? userData['notice'] ?? '0';
         return String(val);
     }
 
@@ -200,6 +201,39 @@ const ruleBasedMatch = (normalizedQ, userData) => {
         return String(userData['pronouns'] ?? 'He/Him');
     }
 
+    // Drug test consent
+    if (normalizedQ.includes('drug test')) {
+        return 'Yes';
+    }
+
+    // Consent / Privacy policy / Terms / Agreement / Certification checkbox questions
+    // e.g. "I understand / I certify / I declare / I agree / Privacy policy / Terms of use"
+    if (
+        normalizedQ.includes('i understand') ||
+        normalizedQ.includes('i certify') ||
+        normalizedQ.includes('i declare') ||
+        normalizedQ.includes('i agree') ||
+        normalizedQ.includes('i acknowledge') ||
+        normalizedQ.includes('i confirm') ||
+        normalizedQ.includes('privacy policy') ||
+        normalizedQ.includes('terms of use') ||
+        normalizedQ.includes('terms and conditions') ||
+        normalizedQ.includes('by checking this box') ||
+        normalizedQ.includes('checking this box') ||
+        normalizedQ.includes('application will not be considered') ||
+        normalizedQ.includes('true and correct')
+    ) {
+        return 'Yes';
+    }
+
+    // Family / close friend at company — safe default is No
+    if (
+        (normalizedQ.includes('family') || normalizedQ.includes('close friend')) &&
+        (normalizedQ.includes('employed') || normalizedQ.includes('relationship') || normalizedQ.includes('work'))
+    ) {
+        return String(userData['family at company'] ?? 'No');
+    }
+
     return null;
 };
 
@@ -235,7 +269,7 @@ const getBestFuzzyMatch = (normalizedQ, userData) => {
 // ---------------------------------------------------------------------------
 // Main exported function — NOW ASYNC (supports AI fallback)
 // ---------------------------------------------------------------------------
-const getAnswer = async (questionText, userData) => {
+const getAnswer = async (questionText, userData, context = {}) => {
     if (!questionText || !userData) return null;
 
     const normalized = normalizeText(questionText);
@@ -249,8 +283,13 @@ const getAnswer = async (questionText, userData) => {
     if (fuzzyAnswer !== null) return fuzzyAnswer;
 
     // 3. AI fallback via Groq + resume (slowest but most intelligent)
-    const aiAnswer = await getAIAnswer(questionText);
+    const aiAnswer = await getAIAnswer(questionText, context);
     if (aiAnswer !== null) return aiAnswer;
+
+    // 4. Final safety-net: if the question looks like a yes/no, answer "Yes"
+    //    so no form field is ever left blank (maximises chance of interview call)
+    const isYesNo = /\b(are you|do you|have you|can you|will you|would you|is your|were you|did you)\b/i.test(questionText);
+    if (isYesNo) return 'Yes';
 
     return null;
 };
