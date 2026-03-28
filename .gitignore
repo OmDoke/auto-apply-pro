@@ -174,4 +174,5 @@ backend/test-pdf-log.txt
 backend/test-pdf-out.txt
 
 # AI agent tooling (not part of the deployable app)
-.agent/
+.agent/
+.env.example
