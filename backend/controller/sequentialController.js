@@ -85,8 +85,10 @@ const runSequence = async (prefs = {}) => {
 
     try {
         await runAgent('LinkedIn Agent', path.join(__dirname, '..', 'agents', 'linkedinAgent.js'), prefs);
-        
         await runAgent('Naukri Agent', path.join(__dirname, '..', 'agents', 'naukriAgent.js'), prefs);
+        await runAgent('Indeed Agent', path.join(__dirname, '..', 'agents', 'indeedAgent.js'), prefs);
+        await runAgent('Glassdoor Agent', path.join(__dirname, '..', 'agents', 'glassdoorAgent.js'), prefs);
+        await runAgent('Wellfound Agent', path.join(__dirname, '..', 'agents', 'wellfoundAgent.js'), prefs);
 
         setStatus('Success');
         addLog('--- Sequence Completed Successfully ---');
@@ -110,6 +112,12 @@ const runSingleAgent = async (agentId, prefs = {}) => {
             await runAgent('LinkedIn Agent', path.join(__dirname, '..', 'agents', 'linkedinAgent.js'), prefs);
         } else if (agentId === 'Naukri Agent') {
             await runAgent('Naukri Agent', path.join(__dirname, '..', 'agents', 'naukriAgent.js'), prefs);
+        } else if (agentId === 'Indeed Agent') {
+            await runAgent('Indeed Agent', path.join(__dirname, '..', 'agents', 'indeedAgent.js'), prefs);
+        } else if (agentId === 'Glassdoor Agent') {
+            await runAgent('Glassdoor Agent', path.join(__dirname, '..', 'agents', 'glassdoorAgent.js'), prefs);
+        } else if (agentId === 'Wellfound Agent') {
+            await runAgent('Wellfound Agent', path.join(__dirname, '..', 'agents', 'wellfoundAgent.js'), prefs);
         } else {
             addLog(`Unknown agent: ${agentId}`);
             return;

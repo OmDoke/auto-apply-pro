@@ -20,6 +20,8 @@
     "@langchain/groq": "^1.1.5",
     "jest": "^29.7.0",
     "pdf-parse": "^1.1.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "socket.io": "^4.8.3",
     "string-similarity": "^4.0.4"
   }
