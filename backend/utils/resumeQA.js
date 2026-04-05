@@ -2,14 +2,23 @@
 
 const fs = require('fs');
 const path = require('path');
-// pdf-parse v1.1.x exports the parse function directly; newer builds
-// wrap it under .default. Support both shapes.
-const _pdfParse = require('pdf-parse');
-const pdf = typeof _pdfParse === 'function' ? _pdfParse : _pdfParse.default;
+
+// Use the internal pdf-parse function directly to avoid broken default-export detection
+// across different installed versions of the package.
+let pdf;
+try {
+    // pdf-parse v1.1.x: the real parse function lives here
+    pdf = require('pdf-parse/lib/pdf-parse');
+} catch (_) {
+    // Fallback for older layout where default export is the function
+    const _pdfParse = require('pdf-parse');
+    pdf = typeof _pdfParse === 'function' ? _pdfParse : _pdfParse.default;
+}
+
 const { ChatGroq } = require('@langchain/groq');
 const { PromptTemplate } = require('@langchain/core/prompts');
 
-// Cache the parsed resume text to avoid re-reading the PDF
+// Cache the parsed resume text to avoid re-reading the PDF on every call
 let cachedResumeText = null;
 
 // Singleton LLM client — instantiated once, reused across all getAIAnswer calls
@@ -49,36 +58,55 @@ async function getResumeText() {
 
     const resumePath = path.join(__dirname, '..', 'data', 'resume.pdf');
     if (!fs.existsSync(resumePath)) {
-        fs.appendFileSync(path.join(__dirname, '..', 'qa_logs.txt'), `[${new Date().toISOString()}] Resume PDF not found at: ${resumePath}\n`);
+        fs.appendFileSync(
+            path.join(__dirname, '..', 'qa_logs.txt'),
+            `[${new Date().toISOString()}] Resume PDF not found at: ${resumePath}\n`
+        );
         return '';
     }
 
     try {
         const dataBuffer = fs.readFileSync(resumePath);
         const data = await pdf(dataBuffer);
-        
+
         if (!data.text || data.text.trim().length === 0) {
-            fs.appendFileSync(path.join(__dirname, '..', 'qa_logs.txt'), `[${new Date().toISOString()}] PDF was parsed but the text is empty. It might be a scanned image containing no text layers.\n`);
+            fs.appendFileSync(
+                path.join(__dirname, '..', 'qa_logs.txt'),
+                `[${new Date().toISOString()}] PDF parsed but text is empty — may be a scanned image with no text layer.\n`
+            );
             return '';
         }
-        
+
         cachedResumeText = data.text;
+        fs.appendFileSync(
+            path.join(__dirname, '..', 'qa_logs.txt'),
+            `[${new Date().toISOString()}] Resume loaded successfully (${cachedResumeText.length} chars).\n`
+        );
         return cachedResumeText;
     } catch (error) {
-        fs.appendFileSync(path.join(__dirname, '..', 'qa_logs.txt'), `[${new Date().toISOString()}] Error parsing resume PDF: ${error.stack || error}\n`);
+        fs.appendFileSync(
+            path.join(__dirname, '..', 'qa_logs.txt'),
+            `[${new Date().toISOString()}] Error parsing resume PDF: ${error.stack || error}\n`
+        );
         return '';
     }
 }
 
 async function getAIAnswer(questionText, context = {}) {
     if (!process.env.GROQ_API_KEY) {
-        fs.appendFileSync(path.join(__dirname, '..', 'qa_logs.txt'), `[${new Date().toISOString()}] No GROQ_API_KEY set.\n`);
+        fs.appendFileSync(
+            path.join(__dirname, '..', 'qa_logs.txt'),
+            `[${new Date().toISOString()}] No GROQ_API_KEY set.\n`
+        );
         return null;
     }
 
     const resumeText = await getResumeText();
     if (!resumeText) {
-        fs.appendFileSync(path.join(__dirname, '..', 'qa_logs.txt'), `[${new Date().toISOString()}] No resume text found.\n`);
+        fs.appendFileSync(
+            path.join(__dirname, '..', 'qa_logs.txt'),
+            `[${new Date().toISOString()}] No resume text found — skipping AI answer.\n`
+        );
         return null;
     }
 
@@ -95,17 +123,18 @@ You are helping a job applicant fill out application forms to secure interviews.
 Use the resume text below to answer the question. FOLLOW ALL RULES STRICTLY.
 
 RULES:
-1. NUMERIC FIELDS (years, decimal, days, number): Output ONLY a single number. No text, no units.
-   - Notice period or can you start immediately → "0"
-   - Total years of relevant experience (sum internships + full-time roles from dates to today)
-2. YES/NO QUESTIONS: Output only "Yes" or "No".
-   - Comfortable / willing / open to / available / agree → "Yes" (even if resume doesn't mention it)
+1. NUMERIC FIELDS (years, decimal, days, number): Output ONLY a single number. No text, no units, no period at end.
+   - Notice period / can you start immediately / joining time → "15"  (this candidate has a 15-day notice period)
+   - Total years of relevant experience → sum internships + full-time roles from dates on resume to today
+   - Years of experience in a specific skill → look at work experience dates, estimate overlap
+2. YES/NO QUESTIONS: Output only "Yes" or "No". No period at end.
+   - Comfortable / willing / open to / available / agree → "Yes"
    - Prior employment at a company NOT in the resume → "No"
-   - Anything else uncertain for a yes/no question → "Yes" (benefit of the doubt to get a callback)
-3. SHORT OPEN TEXT: One short phrase or sentence. NO paragraphs, NO preamble, NO "Based on resume...".
-   - If answer is in resume, use it directly.
-   - If not in resume but a positive/professional answer would help, give a sensible short answer.
-4. UNKNOWN TEXT: Only if you have absolutely NO idea and no sensible default exists, output exactly: I don't know${optionsPrompt}
+   - Uncertain yes/no → "Yes" (benefit of the doubt)
+3. SHORT OPEN TEXT: One short phrase or sentence. No paragraphs, no preamble.
+   - Use resume content directly where available
+   - For current/expected salary: current = 2, expected = 6
+4. UNKNOWN: If you truly have no idea and no sensible default exists, output exactly: I don't know${optionsPrompt}
 
 Current Date: {current_date}
 
@@ -124,23 +153,32 @@ Answer:`);
         });
 
         const response = await invokeWithBackoff(llm, formattedPrompt);
-        const answer = response.content.trim();
 
-        fs.appendFileSync(path.join(__dirname, '..', 'qa_logs.txt'), `[${new Date().toISOString()}] Q: "${questionText}" -> A: "${answer}"\n`);
+        // Clean up the answer: trim whitespace, strip trailing period, take first line only
+        let answer = (response.content || '').trim();
+        answer = answer.split('\n')[0].trim();  // take first line if multi-line
+        answer = answer.replace(/\.$/, '').trim(); // strip trailing period
 
-        // Detect any "I don't know" variant (may appear after a spurious number on a new line)
-        const cleanAnswer = answer.trim();
-        if (/i\s+don'?t\s+know/i.test(cleanAnswer)) {
+        fs.appendFileSync(
+            path.join(__dirname, '..', 'qa_logs.txt'),
+            `[${new Date().toISOString()}] Q: "${questionText}" -> A: "${answer}"\n`
+        );
+
+        if (/i\s+don'?t\s+know/i.test(answer)) {
             return null;
         }
 
-        return answer;
+        return answer || null;
     } catch (error) {
-        fs.appendFileSync(path.join(__dirname, '..', 'qa_logs.txt'), `[${new Date().toISOString()}] Error invoking Groq LLM: ${error}\n`);
+        fs.appendFileSync(
+            path.join(__dirname, '..', 'qa_logs.txt'),
+            `[${new Date().toISOString()}] Error invoking Groq LLM: ${error}\n`
+        );
         return null;
     }
 }
 
 module.exports = {
-    getAIAnswer
+    getAIAnswer,
+    getResumeText,
 };
