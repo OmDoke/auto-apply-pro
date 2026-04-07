@@ -50,4 +50,20 @@ router.delete('/failed-jobs', (req, res) => {
     res.json({ message: 'Failed jobs list cleared.' });
 });
 
+router.get('/hiring-posts', async (req, res) => {
+    const hiringPostsPath = path.join(__dirname, '..', 'data', 'hiring_posts.json');
+    try {
+        const raw = await fs.promises.readFile(hiringPostsPath, 'utf8');
+        res.json(JSON.parse(raw));
+    } catch (e) {
+        res.json([]);
+    }
+});
+
+router.delete('/hiring-posts', (req, res) => {
+    const hiringPostsPath = path.join(__dirname, '..', 'data', 'hiring_posts.json');
+    fs.writeFileSync(hiringPostsPath, '[]');
+    res.json({ message: 'Hiring posts list cleared.' });
+});
+
 module.exports = router;
