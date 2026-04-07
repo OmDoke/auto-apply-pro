@@ -12,6 +12,12 @@ export interface FailedJob {
   url: string;
 }
 
+export interface HiringPost {
+  link: string;
+  postedAt: string;
+  snippet: string;
+}
+
 export interface Preferences {
   jobTitle: string;
   location: string;
@@ -19,6 +25,7 @@ export interface Preferences {
 
 export const agents: { id: string; name: string; desc: string; stub?: boolean }[] = [
   { id: 'LinkedIn Agent', name: 'LinkedIn Auto-Apply', desc: 'Easy Apply for jobs' },
+  { id: 'LinkedIn Post Scraper', name: 'LinkedIn Posts', desc: 'Scrape hiring posts matching your profile' },
   { id: 'Naukri Agent', name: 'Naukri visibility', desc: 'Profile bounce & refresh' },
   { id: 'Indeed Agent', name: 'Indeed Agent', desc: 'Scan and apply to jobs on Indeed using Easy Apply', stub: false },
   { id: 'Glassdoor Agent', name: 'Glassdoor Agent', desc: 'Scan and apply to jobs on Glassdoor (Coming Soon)', stub: true },
