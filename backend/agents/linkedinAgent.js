@@ -126,9 +126,9 @@ const clickDropdownOption = async (page, triggerHandle, optionText) => {
 // suggestion list to appear, then CLICK the first matching suggestion.
 // Returns true if a suggestion was selected, false if timed out.
 // ---------------------------------------------------------------------------
-const handleCityAutocomplete = async (page, inputHandle) => {
+const handleCombobox = async (page, inputHandle, textValue) => {
     try {
-        const cityText = 'Pune';
+        const valString = String(textValue);
 
         // Step 1: Clear the field
         await inputHandle.click({ clickCount: 3 });
@@ -139,7 +139,7 @@ const handleCityAutocomplete = async (page, inputHandle) => {
         await new Promise(r => setTimeout(r, 400));
 
         // Step 2: Type slowly to trigger LinkedIn's typeahead API
-        await inputHandle.type(cityText, { delay: 120 });
+        await inputHandle.type(valString, { delay: 120 });
 
         // Step 3: Wait for autocomplete dropdown to appear (up to 3 seconds)
         const dropdownSelectors = [
@@ -167,15 +167,15 @@ const handleCityAutocomplete = async (page, inputHandle) => {
         }
 
         if (!dropdownFound) {
-            console.log('  City autocomplete: no dropdown appeared, pressing Enter as fallback.');
+            console.log(`  Combobox: no dropdown appeared for "${valString}", pressing Enter as fallback.`);
             await page.keyboard.press('ArrowDown');
             await new Promise(r => setTimeout(r, 300));
             await page.keyboard.press('Enter');
             return false;
         }
 
-        // Step 4: Click the first suggestion that contains 'Pune'
-        const clicked = await page.evaluate((city) => {
+        // Step 4: Click the first suggestion that matches our value
+        const clicked = await page.evaluate((val) => {
             const allSelectors = [
                 '[role="option"]',
                 '[role="listbox"] li',
@@ -187,8 +187,9 @@ const handleCityAutocomplete = async (page, inputHandle) => {
             for (const sel of allSelectors) {
                 const items = Array.from(document.querySelectorAll(sel));
                 for (const item of items) {
-                    const text = (item.innerText || item.textContent || '').toLowerCase();
-                    if (text.includes(city.toLowerCase())) {
+                    const text = (item.innerText || item.textContent || '').toLowerCase().trim();
+                    const target = val.toLowerCase().trim();
+                    if (text === target || text.includes(target) || target.includes(text)) {
                         item.click();
                         return true;
                     }
@@ -203,7 +204,7 @@ const handleCityAutocomplete = async (page, inputHandle) => {
                 }
             }
             return false;
-        }, cityText);
+        }, valString);
 
         await new Promise(r => setTimeout(r, 600));
 
@@ -214,10 +215,10 @@ const handleCityAutocomplete = async (page, inputHandle) => {
             await page.keyboard.press('Enter');
         }
 
-        console.log(`  City autocomplete: selected suggestion for "${cityText}".`);
+        console.log(`  Combobox: selected suggestion for "${valString}".`);
         return true;
     } catch (e) {
-        console.log('  City autocomplete error:', e.message);
+        console.log('  Combobox error:', e.message);
         return false;
     }
 };
@@ -263,19 +264,24 @@ const handleNativeSelect = async (page, selectHandle, value) => {
         );
 
         if (match) {
-            await page.select(await page.evaluate(el => {
-                // Build a unique selector for this specific select element
-                return null; // we'll use elementHandle directly
-            }, selectHandle), match.value);
-            // page.select doesn't work with elementHandle directly; use evaluate
+            try {
+                await selectHandle.select(match.value);
+            } catch (err) {
+                // If Puppeteer native select fails (e.g. element is hidden by custom styling), fallback to evaluate
+            }
+            
+            // Force React binding to update
             await page.evaluate((el, val) => {
                 el.value = val;
                 el.dispatchEvent(new Event('change', { bubbles: true }));
                 el.dispatchEvent(new Event('input', { bubbles: true }));
             }, selectHandle, match.value);
+            
+            await new Promise(r => setTimeout(r, 400));
         }
         return 'OK';
     } catch (e) {
+        console.error('Error handling select:', e.message);
         return 'OK';
     }
 };
@@ -375,7 +381,7 @@ const fillFormFields = async (page, answers) => {
                 const currentVal = await page.evaluate(el => el.value, inputHandle);
                 if (currentVal === String(answer)) continue;
 
-                // Detect city/location fields — LinkedIn uses autocomplete typeahead for these.
+                // Detect city/location fields or other combobox fields (like experience dropdowns that look like inputs)
                 // We must type and then click the dropdown suggestion, NOT just set the value.
                 const qLower = questionText.toLowerCase();
                 const isCityField = (
@@ -386,8 +392,15 @@ const fillFormFields = async (page, answers) => {
                 ) && !qLower.includes('previous') && !qLower.includes('office')
                   && !qLower.includes('address');
 
-                if (isCityField) {
-                    await handleCityAutocomplete(page, inputHandle);
+                const isCombobox = await page.evaluate(el => {
+                    return el.getAttribute('role') === 'combobox' || 
+                           el.classList.contains('search-basic-typeahead-input') ||
+                           el.closest('.search-basic-typeahead') !== null ||
+                           el.hasAttribute('aria-autocomplete');
+                }, inputHandle);
+
+                if (isCityField || isCombobox) {
+                    await handleCombobox(page, inputHandle, answer);
                 } else {
                     // Normal field: Ctrl+A → Delete → type
                     await typeIntoInput(page, inputHandle, answer);
