@@ -405,6 +405,14 @@ const fillFormFields = async (page, answers) => {
                     // Normal field: Ctrl+A → Delete → type
                     await typeIntoInput(page, inputHandle, answer);
                 }
+                
+                // IF CONDITION: if first input field fail then add select for dropdown
+                const finalVal = await page.evaluate(el => el.value, inputHandle);
+                if (finalVal !== String(answer)) {
+                    console.log(`  Typing failed for "${questionText}". Checking for dropdown...`);
+                    await clickDropdownOption(page, inputHandle, answer);
+                }
+
                 await new Promise(r => setTimeout(r, 200));
             } catch (e) {
                 console.log(`  Warning: could not fill text for "${questionText}":`, e.message);

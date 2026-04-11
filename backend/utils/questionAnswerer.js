@@ -267,13 +267,20 @@ const ruleBasedMatch = (normalizedQ, userData) => {
         normalizedQ.includes('i certify') ||
         normalizedQ.includes('i declare') ||
         normalizedQ.includes('i agree') ||
+        normalizedQ.includes('you agree') ||
         normalizedQ.includes('i acknowledge') ||
         normalizedQ.includes('i confirm') ||
         normalizedQ.includes('privacy policy') ||
         normalizedQ.includes('terms of use') ||
         normalizedQ.includes('terms and conditions') ||
+        normalizedQ.includes('data processing') ||
         normalizedQ.includes('by checking this box') ||
         normalizedQ.includes('checking this box') ||
+        normalizedQ.includes('by clicking yes') ||
+        normalizedQ.includes('clicking yes') ||
+        normalizedQ.includes('accurate information') ||
+        normalizedQ.includes('dishonesty') ||
+        normalizedQ.includes('rejection of') ||
         normalizedQ.includes('application will not be considered') ||
         normalizedQ.includes('true and correct')
     ) {
