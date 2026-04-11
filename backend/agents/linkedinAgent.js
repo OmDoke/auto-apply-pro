@@ -278,6 +278,37 @@ const handleNativeSelect = async (page, selectHandle, value) => {
             }, selectHandle, match.value);
             
             await new Promise(r => setTimeout(r, 400));
+        } else if (options.length > 0) {
+            // After the first match attempt, if no match found, try scoring by word overlap
+            const targetWords = targetVal.split(/\s+/);
+            let bestScore = 0;
+            let bestOption = null;
+            for (const opt of options) {
+                const optWords = opt.text.toLowerCase().split(/\s+/);
+                const score = targetWords.filter(w => optWords.some(ow => ow.includes(w) || w.includes(ow))).length;
+                if (score > bestScore) { bestScore = score; bestOption = opt; }
+            }
+            if (bestScore > 0 && bestOption) {
+                try { await selectHandle.select(bestOption.value); } catch(err) {}
+                await page.evaluate((el, val) => {
+                    el.value = val;
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                }, selectHandle, bestOption.value);
+                await new Promise(r => setTimeout(r, 400));
+            } else {
+                // Last resort: select the second option (skip placeholder)
+                const firstReal = options[options.length > 1 ? 1 : 0];
+                if (firstReal) {
+                    try { await selectHandle.select(firstReal.value); } catch(err) {}
+                    await page.evaluate((el, val) => {
+                        el.value = val;
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                    }, selectHandle, firstReal.value);
+                    await new Promise(r => setTimeout(r, 400));
+                }
+            }
         }
         return 'OK';
     } catch (e) {
@@ -296,7 +327,12 @@ const fillFormFields = async (page, answers) => {
     // Collect all form groups with their metadata
     const formGroups = await page.evaluate(() => {
         const groups = Array.from(document.querySelectorAll(
-            '.jobs-easy-apply-form-section__grouping, .fb-dash-form-element, .jobs-easy-apply-form-element__fields'
+            '.jobs-easy-apply-form-section__grouping, ' +
+            '.fb-dash-form-element, ' +
+            '.jobs-easy-apply-form-element__fields, ' +
+            '.jobs-easy-apply-form-element, ' +
+            'fieldset.fb-form-element, ' +
+            '.artdeco-form-item'
         ));
         return groups.map((g, idx) => {
             const labelEl = g.querySelector('label, .fb-dash-form-element__label, legend');
@@ -304,15 +340,19 @@ const fillFormFields = async (page, answers) => {
             let options = [];
 
             const selectEl = g.querySelector('select');
+            const customDropdownBtn = g.querySelector('button[aria-haspopup="listbox"], button[aria-expanded], [role="combobox"]:not(input), .artdeco-dropdown__trigger, .fb-form-element-label + div button');
+            
             if (selectEl) {
                 type = 'select';
                 options = Array.from(selectEl.options)
                     .filter(o => o.value && !o.text.toLowerCase().includes('select'))
                     .map(o => o.text.trim());
+            } else if (customDropdownBtn) {
+                type = 'custom-dropdown';
             }
 
             const radioEls = Array.from(g.querySelectorAll('label'));
-            if (!selectEl && radioEls.length > 0 && g.querySelector('input[type="radio"]')) {
+            if (!selectEl && !customDropdownBtn && radioEls.length > 0 && g.querySelector('input[type="radio"]')) {
                 type = 'radio';
                 options = radioEls.map(r => r.innerText.trim());
             }
@@ -326,7 +366,12 @@ const fillFormFields = async (page, answers) => {
         const answer = await getAnswer(questionText, answers, { type, options });
         if (!answer) continue;
 
-        const groupSelector = '.jobs-easy-apply-form-section__grouping, .fb-dash-form-element, .jobs-easy-apply-form-element__fields';
+        const groupSelector = '.jobs-easy-apply-form-section__grouping, ' +
+            '.fb-dash-form-element, ' +
+            '.jobs-easy-apply-form-element__fields, ' +
+            '.jobs-easy-apply-form-element, ' +
+            'fieldset.fb-form-element, ' +
+            '.artdeco-form-item';
 
         if (type === 'select') {
             // Native <select> element
@@ -342,6 +387,55 @@ const fillFormFields = async (page, answers) => {
                 if (result === 'SKIP_JOB') return 'SKIP_JOB';
             } catch (e) {
                 console.log(`  Warning: could not fill select for "${questionText}":`, e.message);
+            }
+
+        } else if (type === 'custom-dropdown') {
+            try {
+                const groups = await page.$$(groupSelector);
+                const group = groups[idx];
+                if (!group) continue;
+                
+                // Get the trigger button
+                const triggerHandle = await group.$('button[aria-haspopup="listbox"], button[aria-expanded], [role="combobox"]:not(input), .artdeco-dropdown__trigger, .fb-form-element-label + div button');
+                if (!triggerHandle) continue;
+                
+                // Click to open the dropdown
+                await triggerHandle.click();
+                await new Promise(r => setTimeout(r, 800));
+                
+                // Collect visible options from the listbox
+                const availableOptions = await page.evaluate(() => {
+                    return Array.from(document.querySelectorAll('[role="listbox"] [role="option"], [role="option"]'))
+                        .filter(el => el.offsetParent !== null)
+                        .map(el => (el.innerText || el.textContent || '').trim());
+                });
+                
+                // Re-ask getAnswer with the options list so AI/rules can pick the right one
+                const refinedAnswer = await getAnswer(questionText, answers, { type: 'custom-dropdown', options: availableOptions });
+                
+                // Click the matching option
+                const clicked = await page.evaluate((target) => {
+                    const options = Array.from(document.querySelectorAll('[role="listbox"] [role="option"], [role="option"]'))
+                        .filter(el => el.offsetParent !== null);
+                    for (const opt of options) {
+                        const text = (opt.innerText || opt.textContent || '').trim().toLowerCase();
+                        if (text === target.toLowerCase() || text.includes(target.toLowerCase()) || target.toLowerCase().includes(text)) {
+                            opt.click();
+                            return true;
+                        }
+                    }
+                    // Fallback: pick first option
+                    if (options.length > 0) { options[0].click(); return true; }
+                    return false;
+                }, refinedAnswer || answer);
+                
+                if (!clicked) {
+                    // Press Escape to close if nothing matched
+                    await page.keyboard.press('Escape');
+                }
+                await new Promise(r => setTimeout(r, 400));
+            } catch (e) {
+                console.log(`  Warning: could not fill custom dropdown for "${questionText}":`, e.message);
             }
 
         } else if (type === 'radio') {
@@ -409,8 +503,24 @@ const fillFormFields = async (page, answers) => {
                 // IF CONDITION: if first input field fail then add select for dropdown
                 const finalVal = await page.evaluate(el => el.value, inputHandle);
                 if (finalVal !== String(answer)) {
-                    console.log(`  Typing failed for "${questionText}". Checking for dropdown...`);
-                    await clickDropdownOption(page, inputHandle, answer);
+                    console.log(`  Typing failed for "${questionText}". Checking for custom dropdown...`);
+                    // Try custom dropdown trigger on the same group
+                    const groups2 = await page.$$(groupSelector);
+                    const grp2 = groups2[idx];
+                    const customTrigger = grp2 && await grp2.$('button[aria-haspopup="listbox"], button[aria-expanded], .fb-form-element-label + div button');
+                    if (customTrigger) {
+                        await customTrigger.click();
+                        await new Promise(r => setTimeout(r, 800));
+                        await page.evaluate((val) => {
+                            const opts = Array.from(document.querySelectorAll('[role="option"]')).filter(e => e.offsetParent !== null);
+                            for (const o of opts) {
+                                if ((o.innerText || '').toLowerCase().includes(val.toLowerCase())) { o.click(); return; }
+                            }
+                            if (opts[0]) opts[0].click();
+                        }, answer);
+                    } else {
+                        await clickDropdownOption(page, inputHandle, answer);
+                    }
                 }
 
                 await new Promise(r => setTimeout(r, 200));

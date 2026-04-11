@@ -295,6 +295,291 @@ const ruleBasedMatch = (normalizedQ, userData) => {
         return String(userData['family at company'] ?? 'No');
     }
 
+    // ---------- Highest education level (dropdown) ----------
+    if (
+        normalizedQ.includes('highest level of education') ||
+        normalizedQ.includes('highest education') ||
+        normalizedQ.includes('level of education') ||
+        normalizedQ.includes('educational background') ||
+        normalizedQ.includes('highest qualification')
+    ) {
+        return String(userData['education level'] ?? userData['education'] ?? "Bachelor's Degree");
+    }
+
+    // ---------- Graduation year ----------
+    if (
+        normalizedQ.includes('graduation year') ||
+        normalizedQ.includes('year of graduation') ||
+        normalizedQ.includes('when did you graduate') ||
+        normalizedQ.includes('year of passing')
+    ) {
+        return String(userData['graduation year'] ?? '2024');
+    }
+
+    // ---------- Start date / available from ----------
+    if (
+        normalizedQ.includes('start date') ||
+        normalizedQ.includes('available from') ||
+        normalizedQ.includes('earliest start') ||
+        normalizedQ.includes('when can you start')
+    ) {
+        return String(userData['start date'] ?? '15 days');
+    }
+
+    // ---------- Currently employed / working ----------
+    if (
+        (normalizedQ.includes('currently') && normalizedQ.includes('employ')) ||
+        (normalizedQ.includes('currently') && normalizedQ.includes('working')) ||
+        normalizedQ.includes('current employment status') ||
+        normalizedQ.includes('are you currently working')
+    ) {
+        return String(userData['currently employed'] ?? 'No');
+    }
+
+    // ---------- Total / overall years of experience ----------
+    if (
+        (normalizedQ.includes('total') && normalizedQ.includes('experience')) ||
+        normalizedQ.includes('overall experience') ||
+        normalizedQ.includes('total work experience') ||
+        normalizedQ.includes('years of professional experience') ||
+        normalizedQ.includes('how many years of experience')
+    ) {
+        return String(userData['experience'] ?? userData['years'] ?? '1');
+    }
+
+    // ---------- Relevant experience for THIS role ----------
+    if (
+        normalizedQ.includes('relevant experience') ||
+        normalizedQ.includes('directly relevant') ||
+        (normalizedQ.includes('experience') && normalizedQ.includes('this role')) ||
+        (normalizedQ.includes('experience') && normalizedQ.includes('this position'))
+    ) {
+        return String(userData['experience'] ?? '1');
+    }
+
+    // ---------- Full Stack / Frontend / Backend ----------
+    if (normalizedQ.includes('full stack') || normalizedQ.includes('fullstack')) {
+        return String(userData['full stack'] ?? userData['experience'] ?? '1');
+    }
+    if (normalizedQ.includes('frontend') || normalizedQ.includes('front end') || normalizedQ.includes('front-end')) {
+        return String(userData['frontend'] ?? userData['react'] ?? '1');
+    }
+    if (normalizedQ.includes('backend') || normalizedQ.includes('back end') || normalizedQ.includes('back-end')) {
+        return String(userData['backend'] ?? userData['node'] ?? '1');
+    }
+
+    // ---------- Willing to work on-site / in office ----------
+    if (
+        (normalizedQ.includes('willing') && normalizedQ.includes('office')) ||
+        (normalizedQ.includes('open') && normalizedQ.includes('office')) ||
+        normalizedQ.includes('on-site') ||
+        normalizedQ.includes('onsite') ||
+        normalizedQ.includes('work from office') ||
+        normalizedQ.includes('wfo')
+    ) {
+        return String(userData['onsite'] ?? 'Yes');
+    }
+
+    // ---------- Shift / timing flexibility ----------
+    if (
+        normalizedQ.includes('shift') ||
+        (normalizedQ.includes('flexible') && normalizedQ.includes('timing')) ||
+        normalizedQ.includes('rotational shift') ||
+        normalizedQ.includes('night shift') ||
+        normalizedQ.includes('us shift') ||
+        normalizedQ.includes('us hours')
+    ) {
+        return String(userData['shift'] ?? 'Yes');
+    }
+
+    // ---------- Internship / fresher ----------
+    if (
+        normalizedQ.includes('intern') ||
+        normalizedQ.includes('fresher') ||
+        normalizedQ.includes('fresh graduate')
+    ) {
+        return String(userData['experience'] ?? '1');
+    }
+
+    // ---------- Previously applied / worked at this company ----------
+    if (
+        (normalizedQ.includes('previously') || normalizedQ.includes('before') || normalizedQ.includes('before this')) &&
+        (normalizedQ.includes('applied') || normalizedQ.includes('worked') || normalizedQ.includes('employed'))
+    ) {
+        return String(userData['previously applied'] ?? 'No');
+    }
+
+    // ---------- Referral / referred by ----------
+    if (
+        normalizedQ.includes('referred') ||
+        normalizedQ.includes('referral') ||
+        (normalizedQ.includes('how did you hear') && normalizedQ.includes('this job')) ||
+        normalizedQ.includes('source of application')
+    ) {
+        return String(userData['referral'] ?? 'LinkedIn');
+    }
+
+    // ---------- Cover letter ----------
+    if (normalizedQ.includes('cover letter') || (normalizedQ.includes('additional information') && normalizedQ.includes('yourself'))) {
+        return String(userData['cover letter'] ??
+            'I am a motivated Full Stack Developer with hands-on experience in React.js, Node.js, Spring Boot, and MySQL. ' +
+            'I am eager to contribute to your team and grow with the company.');
+    }
+
+    // ---------- Summary / about yourself / tell us about yourself ----------
+    if (
+        normalizedQ.includes('tell us about yourself') ||
+        normalizedQ.includes('about yourself') ||
+        normalizedQ.includes('brief introduction') ||
+        (normalizedQ.includes('summary') && !normalizedQ.includes('salary'))
+    ) {
+        return String(userData['summary'] ??
+            'Full Stack Developer with 1 year of experience in React.js, Node.js, Spring Boot, and MySQL. ' +
+            'CDAC certified. Passionate about building scalable, secure applications.');
+    }
+
+    // ---------- Why do you want to work here ----------
+    if (
+        normalizedQ.includes('why do you want') ||
+        normalizedQ.includes('why this company') ||
+        normalizedQ.includes('why are you interested') ||
+        normalizedQ.includes('why should we hire')
+    ) {
+        return String(userData['why us'] ??
+            'I am impressed by your company\'s work and believe my skills in full-stack development align well with this role. ' +
+            'I am eager to contribute and grow within your team.');
+    }
+
+    // ---------- Preferred job type (full-time, part-time, contract) ----------
+    if (
+        normalizedQ.includes('job type') ||
+        normalizedQ.includes('employment type') ||
+        normalizedQ.includes('full time') ||
+        normalizedQ.includes('full-time') ||
+        normalizedQ.includes('contract') ||
+        normalizedQ.includes('permanent')
+    ) {
+        return String(userData['job type'] ?? 'Full-time');
+    }
+
+    // ---------- Date of birth ----------
+    if (
+        normalizedQ.includes('date of birth') ||
+        normalizedQ.includes('dob') ||
+        normalizedQ.includes('birth date')
+    ) {
+        return String(userData['dob'] ?? userData['date of birth'] ?? '');
+    }
+
+    // ---------- Nationality ----------
+    if (normalizedQ.includes('nationalit')) {
+        return String(userData['nationality'] ?? 'Indian');
+    }
+
+    // ---------- Marital status ----------
+    if (normalizedQ.includes('marital')) {
+        return String(userData['marital status'] ?? 'Single');
+    }
+
+    // ---------- Languages known ----------
+    if (
+        (normalizedQ.includes('language') && normalizedQ.includes('know')) ||
+        (normalizedQ.includes('language') && normalizedQ.includes('speak')) ||
+        normalizedQ.includes('languages you know')
+    ) {
+        return String(userData['languages known'] ?? 'English, Hindi, Marathi');
+    }
+
+    // ---------- Passport ----------
+    if (normalizedQ.includes('passport')) {
+        return String(userData['passport'] ?? 'Yes');
+    }
+
+    // ---------- Background check consent ----------
+    if (
+        normalizedQ.includes('background check') ||
+        normalizedQ.includes('background verification') ||
+        normalizedQ.includes('bgv')
+    ) {
+        return 'Yes';
+    }
+
+    // ---------- Bond / service agreement ----------
+    if (
+        normalizedQ.includes('bond') ||
+        normalizedQ.includes('service agreement') ||
+        normalizedQ.includes('sign a bond')
+    ) {
+        return String(userData['bond'] ?? 'Yes');
+    }
+
+    // ---------- Overtime / extended hours ----------
+    if (
+        normalizedQ.includes('overtime') ||
+        normalizedQ.includes('extended hours') ||
+        normalizedQ.includes('work extra hours')
+    ) {
+        return String(userData['overtime'] ?? 'Yes');
+    }
+
+    // ---------- Travel required ----------
+    if (
+        normalizedQ.includes('travel') &&
+        (normalizedQ.includes('willing') || normalizedQ.includes('open') || normalizedQ.includes('require'))
+    ) {
+        return String(userData['travel'] ?? 'Yes');
+    }
+
+    // ---------- LinkedIn profile URL (standalone field) ----------
+    if (normalizedQ === 'linkedin' || normalizedQ === 'linkedin profile' || normalizedQ === 'linkedin url') {
+        return String(userData['linkedin'] ?? 'https://www.linkedin.com/in/onkar-doke');
+    }
+
+    // ---------- GitHub profile URL (standalone field) ----------
+    if (normalizedQ === 'github' || normalizedQ === 'github profile' || normalizedQ === 'github url') {
+        return String(userData['github'] ?? 'https://github.com/OmDoke');
+    }
+
+    // ---------- CTC in hand (take home) ----------
+    if (normalizedQ.includes('in hand') || normalizedQ.includes('take home') || normalizedQ.includes('net salary')) {
+        return String(userData['in hand salary'] ?? '1.7');
+    }
+
+    // ---------- Hike / increment expected ----------
+    if (
+        normalizedQ.includes('hike') ||
+        normalizedQ.includes('increment') ||
+        (normalizedQ.includes('salary') && normalizedQ.includes('increase'))
+    ) {
+        return String(userData['expected hike'] ?? '30');
+    }
+
+    // ---------- Number of offers / current offers ----------
+    if (
+        normalizedQ.includes('offer') && (normalizedQ.includes('hand') || normalizedQ.includes('current'))
+    ) {
+        return String(userData['offers in hand'] ?? '0');
+    }
+
+    // ---------- Certifications ----------
+    if (
+        normalizedQ.includes('certification') ||
+        normalizedQ.includes('certified') ||
+        normalizedQ.includes('certificate')
+    ) {
+        return String(userData['certifications'] ?? 'PG-DAC from CDAC Pune');
+    }
+
+    // ---------- Preferred work location ----------
+    if (
+        normalizedQ.includes('preferred location') ||
+        normalizedQ.includes('preferred work location') ||
+        normalizedQ.includes('preferred city') ||
+        normalizedQ.includes('location preference')
+    ) {
+        return String(userData['preferred location'] ?? 'Pune, Mumbai, Bangalore, Remote');
+    }
+
     return null;
 };
 
