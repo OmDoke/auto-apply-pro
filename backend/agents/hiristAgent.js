@@ -17,8 +17,11 @@ async function runHiristAgent() {
         console.log("Waiting 60 seconds for manual login...");
         await page.waitForTimeout(60000);
         
-        // Ensure filters map correctly to the hirist query params
-        const searchUrl = 'https://www.hirist.tech/search/jobs.php?experience=0-1&location=remote,maharashtra,india';
+        const jobTitle = process.env.FRONTEND_JOB_TITLE || 'software engineer';
+        const keyword = encodeURIComponent(jobTitle.toLowerCase());
+        
+        // Ensure filters map correctly to the hirist query params (e.g. /search/react?loc=...)
+        const searchUrl = `https://www.hirist.tech/search/${keyword}?loc=remote,maharashtra,india&minexp=0&maxexp=1`;
         console.log(`Navigating to filtered search: ${searchUrl}`);
         await page.goto(searchUrl);
 
