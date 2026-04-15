@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { getAnswer } = require('../utils/questionAnswerer');
+const { getAIAnswer } = require('../utils/resumeQA');
 
 // Load answers.json
 const answersPath = path.join(__dirname, '..', 'data', 'answers.json');
@@ -38,7 +39,7 @@ async function fillHiristFormFields(page, answers) {
 
     // Evaluate basic inputs - simple text/number
     // Usually hirist inputs map to labels
-    const inputs = await page.$$('input[type="text"], input[type="number"], input[type="email"], input[type="tel"]');
+    const inputs = await page.$$('input[type="text"], input[type="number"], input[type="email"], input[type="tel"], textarea');
     for (const input of inputs) {
         // find bounding label or placeholder
         const textToMatch = await page.evaluate(el => {
@@ -52,7 +53,25 @@ async function fillHiristFormFields(page, answers) {
         }, input);
 
         if (textToMatch.trim().length > 2) {
-            const answer = await getAnswer(textToMatch, answers, { type: 'text' });
+            let answer;
+            const lowerMatch = textToMatch.toLowerCase();
+            const isSubjective = lowerMatch.includes('why do you want') || 
+                                 lowerMatch.includes('why should we hire') ||
+                                 lowerMatch.includes('about yourself') ||
+                                 lowerMatch.includes('why this company') ||
+                                 lowerMatch.includes('more about yourself');
+            
+            if (isSubjective) {
+                console.log(`  Calling Groq LLM directly for subjective question: "${textToMatch.substring(0, 30)}..."`);
+                const instruction = " (Instruction: Read the candidate's resume carefully. Write a compelling 2 to 3 sentence paragraph answering this question. Do NOT output just a single sentence snippet. Address the company if named. Tailor it carefully to the candidate's strengths from the resume.)";
+                answer = await getAIAnswer(textToMatch + instruction, { type: 'text' });
+            }
+            
+            // Fallback to static rules / answers.json if Groq failed or not subjective
+            if (!answer) {
+                answer = await getAnswer(textToMatch, answers, { type: 'text' });
+            }
+
             if (answer && (await input.inputValue()) !== String(answer)) {
                  await input.fill(String(answer));
                  console.log(`  Filled input field for "${textToMatch.substring(0, 30)}" with ${answer}`);
