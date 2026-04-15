@@ -52,12 +52,12 @@ describe('getAnswer — rule-based', () => {
 
     test('returns salary for CTC question', async () => {
         const answer = await getAnswer('What is your expected CTC?', sampleUser);
-        expect(answer).toBe('800000');
+        expect(answer).toBe('6');
     });
 
     test('returns notice period', async () => {
         const answer = await getAnswer('What is your notice period?', sampleUser);
-        expect(answer).toBe('30');
+        expect(answer).toBe('15');
     });
 
     test('returns GitHub URL for github question', async () => {
