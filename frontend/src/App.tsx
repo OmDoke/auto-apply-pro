@@ -3,18 +3,26 @@ import { useAgentSystem } from './hooks/useAgentSystem';
 import AgentDashboard from './components/AgentDashboard';
 import ManualReviewPage from './components/ManualReviewPage';
 
+import HiringPostsPage from './components/HiringPostsPage';
+
 function App() {
-  const [showManualReview, setShowManualReview] = useState(false);
+  const [view, setView] = useState<'dashboard' | 'manualReview' | 'hiringPosts'>('dashboard');
   const sys = useAgentSystem();
 
-  if (showManualReview) {
+  if (view === 'manualReview') {
     return (
       <ManualReviewPage 
         onBack={() => { 
-          setShowManualReview(false); 
+          setView('dashboard'); 
           sys.refreshFailedCount(); 
         }} 
       />
+    );
+  }
+
+  if (view === 'hiringPosts') {
+    return (
+      <HiringPostsPage onBack={() => setView('dashboard')} />
     );
   }
 
@@ -27,7 +35,8 @@ function App() {
       handleStartAll={sys.handleStartAll}
       handleStartAgent={sys.handleStartAgent}
       handleStop={sys.handleStop}
-      onShowManualReview={() => setShowManualReview(true)}
+      onShowManualReview={() => setView('manualReview')}
+      onShowHiringPosts={() => setView('hiringPosts')}
     />
   );
 }

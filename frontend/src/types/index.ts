@@ -16,6 +16,15 @@ export interface HiringPost {
   link: string;
   postedAt: string;
   snippet: string;
+  fullText?: string;
+  authorName?: string;
+  authorTitle?: string;
+  authorProfileUrl?: string;
+  emails?: string[];
+  phones?: string[];
+  jobTitle?: string;
+  company?: string;
+  scrapedAt?: string;
 }
 
 export interface Preferences {

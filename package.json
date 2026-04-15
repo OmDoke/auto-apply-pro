@@ -9,6 +9,7 @@
     "dev:backend": "npm run dev --prefix backend",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "build": "npm run build --prefix frontend",
+    "graphify": "graphify .",
     "start": "npm start --prefix backend"
   },
   "devDependencies": {

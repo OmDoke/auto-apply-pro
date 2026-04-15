@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Play, Square, CheckCircle2, AlertCircle, Clock, Terminal, ChevronRight, ExternalLink } from 'lucide-react';
+import { Play, Square, CheckCircle2, AlertCircle, Clock, Terminal, ChevronRight, ExternalLink, Users } from 'lucide-react';
 import { SystemState, Preferences, agents } from '../types';
 
 interface DashboardProps {
@@ -11,10 +11,11 @@ interface DashboardProps {
   handleStartAgent: (id: string) => void;
   handleStop: () => void;
   onShowManualReview: () => void;
+  onShowHiringPosts: () => void;
 }
 
 export default function AgentDashboard({
-  state, prefs, setPrefs, failedCount, handleStartAll, handleStartAgent, handleStop, onShowManualReview
+  state, prefs, setPrefs, failedCount, handleStartAll, handleStartAgent, handleStop, onShowManualReview, onShowHiringPosts
 }: DashboardProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -122,8 +123,18 @@ export default function AgentDashboard({
           ))}
         </div>
 
-        {/* Did Not Apply button */}
-        <div className="flex justify-end">
+        {/* Top/Secondary Action buttons */}
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onShowHiringPosts}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 border relative
+              bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:border-emerald-500/60
+              shadow-[0_0_15px_rgba(16,185,129,0.1)] hover:shadow-[0_0_20px_rgba(16,185,129,0.2)]"
+          >
+            <Users className="w-4 h-4" />
+            Hiring Posts
+          </button>
+          
           <button
             onClick={onShowManualReview}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 border relative
