@@ -26,9 +26,13 @@ async function runHiristAgent() {
         await page.goto(searchUrl);
 
         console.log("Waiting for job cards to load...");
-        await page.waitForSelector('.job-title', { timeout: 15000 }).catch(() => console.log('Job cards timeout...'));
+        await page.waitForSelector('a[href*="/j/"]', { timeout: 15000 }).catch(() => console.log('Job cards timeout...'));
         
-        const jobLinks = await page.$$eval('.job-title a', links => links.map(a => a.href));
+        const jobLinks = await page.$$eval('a[href*="/j/"]', links => {
+            // Filter unique job links just in case there are duplicates (like logo vs title link)
+            const uniqueLinks = [...new Set(links.map(a => a.href))];
+            return uniqueLinks;
+        });
         console.log(`Found ${jobLinks.length} jobs on current page.`);
 
         for (const link of jobLinks) {
