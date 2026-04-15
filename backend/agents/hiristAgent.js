@@ -1,21 +1,140 @@
 const { chromium } = require('playwright');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const { getAnswer } = require('../utils/questionAnswerer');
+
+// Load answers.json
+const answersPath = path.join(__dirname, '..', 'data', 'answers.json');
+let presetAnswers = {};
+if (fs.existsSync(answersPath)) {
+    try {
+        presetAnswers = JSON.parse(fs.readFileSync(answersPath, 'utf8'));
+    } catch(err) {
+        console.error('Could not parse answers.json:', err);
+    }
+}
+const resumePath = path.join(__dirname, '..', 'data', 'resume.pdf');
+
+/* Form Filler Function for Hirist */
+async function fillHiristFormFields(page, answers) {
+    if (Object.keys(answers).length === 0) return;
+
+    // Wait a brief moment for form to render
+    await page.waitForTimeout(1500);
+    
+    // Resume Upload first
+    const fileInputs = await page.$$('input[type="file"]');
+    if (fileInputs.length > 0 && fs.existsSync(resumePath)) {
+        for (const input of fileInputs) {
+            try {
+                await input.setInputFiles(resumePath);
+                console.log('  Uploaded resume.pdf');
+            } catch (err) {
+                // ignore
+            }
+        }
+    }
+
+    // Evaluate basic inputs - simple text/number
+    // Usually hirist inputs map to labels
+    const inputs = await page.$$('input[type="text"], input[type="number"], input[type="email"], input[type="tel"]');
+    for (const input of inputs) {
+        // find bounding label or placeholder
+        const textToMatch = await page.evaluate(el => {
+            let t = el.getAttribute('placeholder') || '';
+            let label = el.closest('label');
+            if(label) t += ' ' + label.innerText;
+            // check for prior sibling element that might be a label
+            let prev = el.previousElementSibling;
+            if(prev) t += ' ' + prev.innerText;
+            return t;
+        }, input);
+
+        if (textToMatch.trim().length > 2) {
+            const answer = await getAnswer(textToMatch, answers, { type: 'text' });
+            if (answer && (await input.inputValue()) !== String(answer)) {
+                 await input.fill(String(answer));
+                 console.log(`  Filled input field for "${textToMatch.substring(0, 30)}" with ${answer}`);
+            }
+        }
+    }
+    
+    // Dropdowns
+    const selects = await page.$$('select');
+    for (const sel of selects) {
+        const textToMatch = await page.evaluate(el => {
+            let t = el.getAttribute('name') || '';
+            let label = el.closest('label');
+            if(label) t += ' ' + label.innerText;
+            let prev = el.previousElementSibling;
+            if(prev) t += ' ' + prev.innerText;
+            return t;
+        }, sel);
+        
+        if (textToMatch.trim().length > 2) {
+            const answer = await getAnswer(textToMatch, answers, { type: 'select' });
+            if (answer) {
+                try { 
+                    // Let Playwright match either label or value
+                    await sel.selectOption({ label: answer }).catch(async () => {
+                        await sel.selectOption({ index: 1 }); // fallback
+                    });
+                    console.log(`  Selected dropdown for "${textToMatch.substring(0, 30)}"`);
+                } catch(e) {}
+            }
+        }
+    }
+    
+    // Checkboxes / Radios
+    const checks = await page.$$('input[type="radio"], input[type="checkbox"]');
+    for (const c of checks) {
+        const textToMatch = await page.evaluate(el => {
+            let t = el.closest('label') ? el.closest('label').innerText : (el.nextElementSibling ? el.nextElementSibling.innerText : '');
+            return t;
+        });
+        if (textToMatch.trim().length > 2) {
+            const answer = await getAnswer(textToMatch, answers, { type: 'radio' });
+            if (answer && (answer.toLowerCase() === 'yes' || textToMatch.toLowerCase().includes(answer.toLowerCase()))) {
+                 try{ 
+                    await c.check();
+                    console.log(`  Checked option for "${textToMatch.substring(0, 30)}"`);
+                 } catch(e){}
+            }
+        }
+    }
+}
 
 async function runHiristAgent() {
     console.log("Starting Hirist Agent via Playwright...");
     
     // Setup Playwright
+    const userDataDir = path.join(__dirname, '..', 'data', 'puppeteer', 'hirist_auth.json');
     const browser = await chromium.launch({ headless: false });
-    const context = await browser.newContext();
+    
+    let context;
+    if (fs.existsSync(userDataDir)) {
+        console.log("Using existing session storage to bypass login...");
+        context = await browser.newContext({ storageState: userDataDir });
+    } else {
+        context = await browser.newContext();
+    }
+    
     const page = await context.newPage();
 
     try {
-        console.log("Navigating to hirist.tech for manual login pause...");
-        await page.goto('https://www.hirist.tech/');
-        
-        console.log("Waiting 60 seconds for manual login...");
-        await page.waitForTimeout(60000);
+        if (!fs.existsSync(userDataDir)) {
+            console.log("Navigating to hirist.tech for manual login pause...");
+            await page.goto('https://www.hirist.tech/');
+            
+            console.log("Waiting 60 seconds for manual login...");
+            await page.waitForTimeout(60000);
+            
+            console.log("Saving session state...");
+            await context.storageState({ path: userDataDir });
+        } else {
+            console.log("Session found, skipping manual login pause.");
+        }
         
         const jobTitle = process.env.FRONTEND_JOB_TITLE || 'software engineer';
         const keyword = encodeURIComponent(jobTitle.toLowerCase());
@@ -52,7 +171,23 @@ async function runHiristAgent() {
                     if(!jobPage.url().includes('hirist.tech')){
                         console.log("External redirect detected. Skipping.");
                     } else {
-                         console.log("Internal Apply completed.");
+                         console.log("Internal Apply detected. Handling questionnaire...");
+                         
+                         let attempts = 0;
+                         while(attempts < 3) {
+                             await fillHiristFormFields(jobPage, presetAnswers);
+                             
+                             const submitBtn = await jobPage.$('button:has-text("Submit"), button:has-text("Next"), button:has-text("Proceed")');
+                             if(submitBtn) {
+                                 console.log("Clicking Submit/Next button...");
+                                 await submitBtn.click();
+                                 await jobPage.waitForTimeout(3000); // Wait for potential next step
+                             } else {
+                                 break; // No more submit buttons found, we are either done or stuck
+                             }
+                             attempts++;
+                         }
+                         console.log("Internal Apply completion logic finished.");
                     }
                 } else {
                     console.log("Apply button not found or already applied.");
