@@ -154,10 +154,11 @@ async function fillHiristFormFields(page, answers) {
             const name = el.name || 'unnamed_' + Math.random();
             if (!groups[name]) {
                 let qText = '';
-                let container = el.closest('.form-group, fieldset, div[class*="group"], .question-container');
+                // Match Hirist exact nested class structure like .yes-no-answer-question-container
+                let container = el.closest('.form-group, fieldset, div[class*="group"], div[class*="question-container"], [class*="question-"]');
                 if (container) {
-                    let containerLabel = container.querySelector('legend, h2, h3, h4, p, label');
-                    if (containerLabel) qText = containerLabel.innerText.trim();
+                    let containerLabel = container.querySelector('legend, h2, h3, h4, p, label, .question-text, .mandatory-question');
+                    if (containerLabel) qText = containerLabel.innerText.replace(/[\n\r]+/g, ' ').trim();
                 }
                 groups[name] = { question: qText, options: [] };
             }
