@@ -17,6 +17,25 @@ if (fs.existsSync(answersPath)) {
 }
 const resumePath = path.join(__dirname, '..', 'data', 'resume.pdf');
 
+// Path to persist failed jobs
+const failedJobsPath = path.join(__dirname, '..', 'data', 'failed_jobs.json');
+
+// Helper: merge & save failed jobs to disk
+const saveFailedJobs = (failedJobs) => {
+    if (failedJobs.length === 0) return;
+    try {
+        let existing = [];
+        if (fs.existsSync(failedJobsPath)) {
+            existing = JSON.parse(fs.readFileSync(failedJobsPath, 'utf8'));
+        }
+        const merged = [...existing, ...failedJobs];
+        fs.writeFileSync(failedJobsPath, JSON.stringify(merged, null, 2));
+        console.log(`Failed jobs saved to failed_jobs.json (newly added: ${failedJobs.length})`);
+    } catch (e) {
+        console.log('Could not save failed_jobs.json:', e.message);
+    }
+};
+
 /* Form Filler Function for Hirist */
 async function fillHiristFormFields(page, answers) {
     if (Object.keys(answers).length === 0) return;
@@ -31,9 +50,7 @@ async function fillHiristFormFields(page, answers) {
             try {
                 await input.setInputFiles(resumePath);
                 console.log('  Uploaded resume.pdf');
-            } catch (err) {
-                // ignore
-            }
+            } catch (err) { }
         }
     }
 
@@ -49,6 +66,15 @@ async function fillHiristFormFields(page, answers) {
             // check for prior sibling element that might be a label
             let prev = el.previousElementSibling;
             if(prev) t += ' ' + prev.innerText;
+            
+            // Look upward for a parent form-group
+            if (!t || t.trim().length < 3) {
+                let container = el.closest('.form-group, fieldset, div[class*="group"]');
+                if (container) {
+                    let containerLabel = container.querySelector('label, h3, h4, p');
+                    if (containerLabel) t += ' ' + containerLabel.innerText;
+                }
+            }
             return t;
         }, input);
 
@@ -88,37 +114,85 @@ async function fillHiristFormFields(page, answers) {
             if(label) t += ' ' + label.innerText;
             let prev = el.previousElementSibling;
             if(prev) t += ' ' + prev.innerText;
+            if (!t || t.trim().length < 3) {
+                let container = el.closest('.form-group, fieldset, div[class*="group"]');
+                if (container) {
+                    let containerLabel = container.querySelector('label, h3, h4, span.label-text');
+                    if (containerLabel) t += ' ' + containerLabel.innerText;
+                }
+            }
             return t;
         }, sel);
         
         if (textToMatch.trim().length > 2) {
             const answer = await getAnswer(textToMatch, answers, { type: 'select' });
             if (answer) {
-                try { 
-                    // Let Playwright match either label or value
-                    await sel.selectOption({ label: answer }).catch(async () => {
-                        await sel.selectOption({ index: 1 }); // fallback
-                    });
-                    console.log(`  Selected dropdown for "${textToMatch.substring(0, 30)}"`);
+                try {
+                    // Extract all options from the select and try to fuzzy match internally
+                    const options = await sel.$$eval('option', opts => 
+                        opts.map(o => ({ text: o.innerText.trim(), value: o.value })).filter(o => o.value)
+                    );
+                    const lowerAnswer = String(answer).toLowerCase();
+                    const match = options.find(o => o.text.toLowerCase().includes(lowerAnswer) || o.value.toLowerCase().includes(lowerAnswer));
+                    
+                    if (match) {
+                        await sel.selectOption({ value: match.value });
+                        console.log(`  Selected dropdown "${match.text}" for "${textToMatch.substring(0, 30)}..."`);
+                    } else if (options.length > 0) {
+                        await sel.selectOption({ value: options[0].value });
+                        console.log(`  Selected dropdown fallback for "${textToMatch.substring(0, 30)}..."`);
+                    }
                 } catch(e) {}
             }
         }
     }
     
-    // Checkboxes / Radios
-    const checks = await page.$$('input[type="radio"], input[type="checkbox"]');
-    for (const c of checks) {
-        const textToMatch = await page.evaluate(el => {
-            let t = el.closest('label') ? el.closest('label').innerText : (el.nextElementSibling ? el.nextElementSibling.innerText : '');
-            return t;
+    // Checkboxes / Radios - Properly grouped layout
+    const radioGroups = await page.evaluate(() => {
+        const groups = {};
+        document.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(el => {
+            const name = el.name || 'unnamed_' + Math.random();
+            if (!groups[name]) {
+                let qText = '';
+                let container = el.closest('.form-group, fieldset, div[class*="group"], .question-container');
+                if (container) {
+                    let containerLabel = container.querySelector('legend, h2, h3, h4, p, label');
+                    if (containerLabel) qText = containerLabel.innerText.trim();
+                }
+                groups[name] = { question: qText, options: [] };
+            }
+            
+            let labelElement = el.closest('label');
+            if(!labelElement && el.id){ 
+                labelElement = document.querySelector(`label[for="${el.id}"]`);
+            }
+            if(!labelElement){
+                labelElement = el.nextElementSibling;
+            }
+            let optText = labelElement ? labelElement.innerText.trim() : el.value;
+            
+            // Assign dynamic ID for playwright to click
+            if (!el.id) el.id = 'gen_id_' + Math.random().toString(36).substring(2);
+            groups[name].options.push({ text: optText, id: el.id });
         });
-        if (textToMatch.trim().length > 2) {
-            const answer = await getAnswer(textToMatch, answers, { type: 'radio' });
-            if (answer && (answer.toLowerCase() === 'yes' || textToMatch.toLowerCase().includes(answer.toLowerCase()))) {
-                 try{ 
-                    await c.check();
-                    console.log(`  Checked option for "${textToMatch.substring(0, 30)}"`);
-                 } catch(e){}
+        return Object.values(groups);
+    });
+
+    for (const group of radioGroups) {
+        if (group.question && group.question.length > 2) {
+            const answer = await getAnswer(group.question, answers, { type: 'radio' });
+            if (answer) {
+                const lowerAns = String(answer).toLowerCase();
+                const matchedOpt = group.options.find(o => o.text.toLowerCase() === lowerAns || o.text.toLowerCase().includes(lowerAns));
+                if (matchedOpt) {
+                    try {
+                        const cHandle = await page.$(`#${matchedOpt.id}`);
+                        if (cHandle) {
+                            await cHandle.check();
+                            console.log(`  Checked option "${matchedOpt.text}" for "${group.question.substring(0, 30)}..."`);
+                        }
+                    } catch(e) {}
+                }
             }
         }
     }
@@ -130,6 +204,7 @@ async function runHiristAgent() {
     // Setup Playwright
     const userDataDir = path.join(__dirname, '..', 'data', 'puppeteer', 'hirist_auth.json');
     const browser = await chromium.launch({ headless: false });
+    const failedJobsToSave = [];
     
     let context;
     if (fs.existsSync(userDataDir)) {
@@ -193,20 +268,35 @@ async function runHiristAgent() {
                          console.log("Internal Apply detected. Handling questionnaire...");
                          
                          let attempts = 0;
-                         while(attempts < 3) {
+                         let success = false;
+                         const MAX_ATTEMPTS = 2; // Strict 2 parameter attempt
+                         
+                         while(attempts < MAX_ATTEMPTS) {
                              await fillHiristFormFields(jobPage, presetAnswers);
                              
                              const submitBtn = await jobPage.$('button:has-text("Submit"), button:has-text("Next"), button:has-text("Proceed")');
                              if(submitBtn) {
-                                 console.log("Clicking Submit/Next button...");
+                                 console.log(`  Clicking Submit/Next button (Attempt ${attempts + 1}/${MAX_ATTEMPTS})...`);
                                  await submitBtn.click();
                                  await jobPage.waitForTimeout(3000); // Wait for potential next step
                              } else {
+                                 success = true;
                                  break; // No more submit buttons found, we are either done or stuck
                              }
                              attempts++;
                          }
-                         console.log("Internal Apply completion logic finished.");
+                         
+                         if (!success) {
+                             const stillHasSubmit = await jobPage.$('button:has-text("Submit"), button:has-text("Next"), button:has-text("Proceed")');
+                             if (stillHasSubmit) {
+                                  console.log("  Internal Apply stuck! Exhausted 2 attempts. Marking as Failed...");
+                                  failedJobsToSave.push({ title: 'Hirist Job', company: 'Hirist.tech', url: link });
+                             } else {
+                                  console.log("  Internal Apply form submitted successfully!");
+                             }
+                         } else {
+                             console.log("  Internal Apply form submitted successfully!");
+                         }
                     }
                 } else {
                     console.log("Apply button not found or already applied.");
@@ -215,8 +305,12 @@ async function runHiristAgent() {
                 await jobPage.close();
             } catch (jobErr) {
                 console.log(`Failed applying to job ${link}: ${jobErr.message}`);
-                // Continue to next job
+                failedJobsToSave.push({ title: 'Hirist Job', company: 'Hirist.tech', url: link });
             }
+        }
+        
+        if (failedJobsToSave.length > 0) {
+            saveFailedJobs(failedJobsToSave);
         }
         
     } catch (e) {
