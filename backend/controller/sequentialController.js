@@ -86,6 +86,7 @@ const runSequence = async (prefs = {}) => {
     try {
         await runAgent('LinkedIn Agent', path.join(__dirname, '..', 'agents', 'linkedinAgent.js'), prefs);
         await runAgent('Post Scraper', path.join(__dirname, '..', 'agents', 'linkedinPostScraper.js'), prefs);
+        await runAgent('Hirist Agent', path.join(__dirname, '..', 'agents', 'hiristAgent.js'), prefs);
         await runAgent('Naukri Agent', path.join(__dirname, '..', 'agents', 'naukriAgent.js'), prefs);
         await runAgent('Indeed Agent', path.join(__dirname, '..', 'agents', 'indeedAgent.js'), prefs);
         await runAgent('Glassdoor Agent', path.join(__dirname, '..', 'agents', 'glassdoorAgent.js'), prefs);
@@ -113,6 +114,8 @@ const runSingleAgent = async (agentId, prefs = {}) => {
             await runAgent('LinkedIn Agent', path.join(__dirname, '..', 'agents', 'linkedinAgent.js'), prefs);
         } else if (agentId === 'LinkedIn Post Scraper') {
             await runAgent('Post Scraper', path.join(__dirname, '..', 'agents', 'linkedinPostScraper.js'), prefs);
+        } else if (agentId === 'Hirist Agent') {
+            await runAgent('Hirist Agent', path.join(__dirname, '..', 'agents', 'hiristAgent.js'), prefs);
         } else if (agentId === 'Naukri Agent') {
             await runAgent('Naukri Agent', path.join(__dirname, '..', 'agents', 'naukriAgent.js'), prefs);
         } else if (agentId === 'Indeed Agent') {
