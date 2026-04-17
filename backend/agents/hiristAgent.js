@@ -136,10 +136,10 @@ async function fillHiristFormFields(page, answers) {
                     const match = options.find(o => o.text.toLowerCase().includes(lowerAnswer) || o.value.toLowerCase().includes(lowerAnswer));
                     
                     if (match) {
-                        await sel.selectOption({ value: match.value });
+                        await sel.selectOption({ value: match.value }, { force: true });
                         console.log(`  Selected dropdown "${match.text}" for "${textToMatch.substring(0, 30)}..."`);
                     } else if (options.length > 0) {
-                        await sel.selectOption({ value: options[0].value });
+                        await sel.selectOption({ value: options[0].value }, { force: true });
                         console.log(`  Selected dropdown fallback for "${textToMatch.substring(0, 30)}..."`);
                     }
                 } catch(e) {}
@@ -187,12 +187,36 @@ async function fillHiristFormFields(page, answers) {
                 const matchedOpt = group.options.find(o => o.text.toLowerCase() === lowerAns || o.text.toLowerCase().includes(lowerAns));
                 if (matchedOpt) {
                     try {
-                        const cHandle = await page.$(`#${matchedOpt.id}`);
+                        const cHandle = await page.$(`[id="${matchedOpt.id}"]`);
                         if (cHandle) {
-                            await cHandle.check();
+                            await cHandle.check({ force: true });
                             console.log(`  Checked option "${matchedOpt.text}" for "${group.question.substring(0, 30)}..."`);
+                        } else {
+                            await page.evaluate((id) => {
+                                const el = document.getElementById(id) || document.querySelector(`[id="${id}"]`);
+                                if (el) {
+                                    el.click();
+                                    el.checked = true;
+                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            }, matchedOpt.id);
+                            console.log(`  Checked option "${matchedOpt.text}" evaluate fallback for "${group.question.substring(0, 30)}..."`);
                         }
-                    } catch(e) {}
+                    } catch(e) {
+                         try {
+                              await page.evaluate((id) => {
+                                  const el = document.getElementById(id) || document.querySelector(`[id="${id}"]`);
+                                  if (el) {
+                                      el.click();
+                                      el.checked = true;
+                                      el.dispatchEvent(new Event('change', { bubbles: true }));
+                                  }
+                              }, matchedOpt.id);
+                              console.log(`  Checked option "${matchedOpt.text}" evaluate fallback after catch for "${group.question.substring(0, 30)}..."`);
+                         } catch(evalErr) {
+                              console.log(`  Failed to check option: ${e.message}`);
+                         }
+                    }
                 }
             }
         }
