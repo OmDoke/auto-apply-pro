@@ -2,7 +2,51 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const { spawn } = require('child_process');
 const { runSequence, runSingleAgent, stopSequence, getStatus } = require('../controller/sequentialController');
+
+// ── Chrome launcher for Indeed Agent ──────────────────────────────────────────
+// Possible Chrome binary locations on Windows
+const CHROME_PATHS = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    process.env.CHROME_PATH || '',
+].filter(Boolean);
+
+let chromeProcess = null;
+
+router.post('/open-chrome', (req, res) => {
+    const chromePath = CHROME_PATHS.find(p => fs.existsSync(p));
+    if (!chromePath) {
+        return res.status(500).json({ ok: false, message: 'Chrome not found. Set CHROME_PATH in .env' });
+    }
+    if (chromeProcess && !chromeProcess.killed) {
+        return res.json({ ok: true, message: 'Chrome already running.' });
+    }
+    try {
+        chromeProcess = spawn(chromePath, [
+            '--remote-debugging-port=9222',
+            '--no-first-run',
+            '--no-default-browser-check',
+        ], { detached: true, stdio: 'ignore' });
+        chromeProcess.unref();
+        console.log(`[Chrome] Launched with remote debugging on port 9222 (pid ${chromeProcess.pid})`);
+        res.json({ ok: true, message: `Chrome launched (pid ${chromeProcess.pid})` });
+    } catch (e) {
+        res.status(500).json({ ok: false, message: e.message });
+    }
+});
+
+router.get('/chrome-status', (req, res) => {
+    const options = { hostname: 'localhost', port: 9222, path: '/json/version', timeout: 2000 };
+    const probe = http.get(options, (r) => {
+        res.json({ reachable: r.statusCode === 200 });
+        probe.destroy();
+    });
+    probe.on('error', () => res.json({ reachable: false }));
+    probe.on('timeout', () => { probe.destroy(); res.json({ reachable: false }); });
+});
 
 router.get('/health', (req, res) => {
     res.json({ status: 'ok', message: 'Universal Job Agent backend is running' });

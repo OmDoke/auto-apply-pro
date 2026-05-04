@@ -1,6 +1,14 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteer.use(StealthPlugin());
+const stealth = StealthPlugin();
+stealth.enabledEvasions = new Set([
+    'chrome.app', 'chrome.csi', 'chrome.loadTimes', 'chrome.runtime',
+    'iframe.contentWindow', 'media.codecs', 'navigator.hardwareConcurrency',
+    'navigator.languages', 'navigator.permissions', 'navigator.plugins',
+    'navigator.vendor', 'navigator.webdriver', 'sourceurl',
+    'user-agent-override', 'webgl.vendor', 'window.outerdimensions'
+]);
+puppeteer.use(stealth);
 const fs = require('fs');
 const path = require('path');
 const { getAnswer } = require('../utils/questionAnswerer');
@@ -71,20 +79,24 @@ class BaseAgent {
         console.log(`[${this.agentName}] Initializing browser...`);
         this.browser = await puppeteer.launch({
             headless: false,
+            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
             userDataDir: this.userDataDir,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1280,800', '--disable-blink-features=AutomationControlled']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--window-size=1280,800',
+                '--disable-blink-features=AutomationControlled',
+                '--lang=en-US,en',
+                '--disable-infobars',
+                '--disable-dev-shm-usage',
+                '--disable-extensions-except',
+                '--exclude-switches=enable-automation',
+                '--disable-automation',
+            ],
+            ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection'],
         });
         this.page = await this.browser.newPage();
         await this.page.setViewport({ width: 1280, height: 800 });
-        
-        // Stealth bypass for strict platforms like Indeed / Cloudflare
-        await this.page.evaluateOnNewDocument(() => {
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-            window.chrome = { runtime: {} };
-        });
-        
-        // Set a default timeout
         this.page.setDefaultNavigationTimeout(60000);
         this.page.setDefaultTimeout(15000);
         
@@ -134,10 +146,13 @@ class BaseAgent {
 
         const formGroups = await this.page.evaluate(() => {
             const groups = Array.from(document.querySelectorAll(
-                '.jobs-easy-apply-form-section__grouping, .fb-dash-form-element, .jobs-easy-apply-form-element__fields'
+                '.jobs-easy-apply-form-section__grouping, .fb-dash-form-element, .jobs-easy-apply-form-element__fields, .jobs-easy-apply-form-element, fieldset.fb-form-element, .artdeco-form-item, .artdeco-text-input--container'
             ));
             return groups.map((g, idx) => {
-                const labelEl = g.querySelector('label, .fb-dash-form-element__label, legend');
+                let labelEl = g.querySelector('label, .fb-dash-form-element__label, legend, .artdeco-text-input__label, .fb-form-element-label, span[data-test-form-builder-radio-button-form-component__title]');
+                if (!labelEl) {
+                    labelEl = g.querySelector('span.t-14, h3.t-14, .jobs-easy-apply-form-element span[aria-hidden="true"], .jobs-easy-apply-form-section__grouping span.visually-hidden');
+                }
                 let type = 'text';
                 let options = [];
                 

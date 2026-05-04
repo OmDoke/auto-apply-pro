@@ -49,11 +49,38 @@ const detectSalaryType = (normalizedQ) => {
 // Rule-based matcher — fast, deterministic, highest priority
 // Returns an answer string or null.
 // ---------------------------------------------------------------------------
-const ruleBasedMatch = (normalizedQ, userData) => {
+const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
 
-    // ---------- Notice period (ALWAYS "15") ----------
-    if (normalizedQ.includes('notice') || normalizedQ.includes('joining') || normalizedQ.includes('how soon can you join')) {
-        return '15';
+    // ---------- Notice period / Can you start immediately ----------
+    if (normalizedQ.includes('notice') || normalizedQ.includes('joining') || normalizedQ.includes('how soon can you join') ||
+        normalizedQ.includes('start immediately') || normalizedQ.includes('immediate') || normalizedQ.includes('can you start')) {
+        // For dropdowns/radio: return a text label that can match options like '15 days', '0-1 month'
+        if (context && (context.type === 'select' || context.type === 'custom-dropdown' || context.type === 'radio')) {
+            // Yes/No radio: "Can you start immediately?" → No (we have 15-day notice)
+            if (context.options && context.options.length > 0) {
+                const opts = context.options.map(o => o.toLowerCase());
+                if (opts.includes('yes') && opts.includes('no')) {
+                    // "immediately" means right now — we can't, so No
+                    if (normalizedQ.includes('immediately') || normalizedQ.includes('immediate') || normalizedQ.includes('instant')) {
+                        return 'No';
+                    }
+                    // Generic yes/no for notice period → Yes (we are available)
+                    return 'Yes';
+                }
+                // Try to match 15-day-ish option
+                for (const opt of opts) {
+                    if (opt.includes('15') || opt.includes('two week') || opt.includes('2 week')) return context.options[opts.indexOf(opt)];
+                }
+                // Fallback: first month-ish option
+                for (const opt of opts) {
+                    if (opt.includes('month') || opt.includes('30') || opt.includes('less than')) return context.options[opts.indexOf(opt)];
+                }
+                // Ultimate fallback: first option
+                return context.options[0];
+            }
+            return '15 days';
+        }
+        return userData['notice period'] ?? '15';
     }
 
     // ---------- Salary / CTC / compensation — current vs expected ----------
@@ -164,6 +191,26 @@ const ruleBasedMatch = (normalizedQ, userData) => {
         return String(userData['race'] ?? 'Decline to self-identify');
     }
 
+    // ---------- Phone / Mobile number (must come BEFORE fuzzy to avoid surname match) ----------
+    if (
+        normalizedQ.includes('phone') ||
+        normalizedQ.includes('mobile') ||
+        normalizedQ.includes('contact number') ||
+        normalizedQ.includes('cell') ||
+        normalizedQ.includes('telephone') ||
+        normalizedQ === 'number'
+    ) {
+        // Country code dropdowns: if options are present and look like country code labels,
+        // return the matching country label (e.g. "India (+91)") not the raw phone number
+        if (context.options && context.options.length > 0) {
+            const countryOpt = context.options.find(o => /india|\+91/i.test(o));
+            if (countryOpt) return countryOpt;
+            // generic country-code dropdown: first non-empty option
+            return context.options[0];
+        }
+        return String(userData['phone'] ?? userData['mobile'] ?? userData['contact'] ?? '');
+    }
+
     // ---------- Pincode / Zip / Postal code ----------
     if (
         normalizedQ.includes('pincode') ||
@@ -217,6 +264,14 @@ const ruleBasedMatch = (normalizedQ, userData) => {
         normalizedQ.includes('graduation') ||
         normalizedQ.includes('qualification')
     ) {
+        // If the question is a yes/no form ("Have you completed Bachelor's Degree?")
+        // with options Yes/No, always answer Yes
+        if (context.options && context.options.length > 0) {
+            const lowerOpts = context.options.map(o => o.toLowerCase());
+            if (lowerOpts.includes('yes') && lowerOpts.includes('no')) {
+                return 'Yes';
+            }
+        }
         const val = userData['education'] ?? userData['degree'] ?? 'Post Graduate Diploma in Advanced Computing (PG-DAC)';
         return String(val);
     }
@@ -580,6 +635,20 @@ const ruleBasedMatch = (normalizedQ, userData) => {
         return String(userData['preferred location'] ?? 'Pune, Mumbai, Bangalore, Remote');
     }
 
+    // ---------- Email address ----------
+    if (normalizedQ.includes('email')) {
+        // If it's a select/dropdown with options, pick the matching email or first available
+        if (context.options && context.options.length > 0) {
+            const ourEmail = String(userData['email'] ?? '').toLowerCase();
+            const match = context.options.find(o =>
+                o.toLowerCase() === ourEmail ||
+                (ourEmail.split('@')[0] && o.toLowerCase().split('@')[0] === ourEmail.split('@')[0])
+            );
+            return match || context.options[0];
+        }
+        return String(userData['email'] ?? '');
+    }
+
     return null;
 };
 
@@ -598,13 +667,22 @@ const getBestFuzzyMatch = (normalizedQ, userData) => {
         normalizedKeys
     );
 
-    if (bestMatch.rating >= 0.4) {
-        return String(userData[keys[bestMatchIndex]]);
+    // Raised threshold to 0.6 to prevent wrong answers (e.g. surname filling phone field)
+    if (bestMatch.rating >= 0.6) {
+        const matchedKey = keys[bestMatchIndex];
+        // Safety: never return a personal name value for a non-name question
+        const isNameKey = ['first name', 'last name', 'full name'].includes(matchedKey.toLowerCase());
+        const isNameQuestion = normalizedQ.includes('name');
+        if (isNameKey && !isNameQuestion) return null;
+        return String(userData[matchedKey]);
     }
 
     // Secondary pass: check if any key is a substring of the question
     for (let i = 0; i < normalizedKeys.length; i++) {
-        if (normalizedKeys[i].length > 2 && normalizedQ.includes(normalizedKeys[i])) {
+        if (normalizedKeys[i].length > 3 && normalizedQ.includes(normalizedKeys[i])) {
+            // Safety: skip name keys for non-name questions
+            const isNameKey = ['first name', 'last name', 'full name'].includes(normalizedKeys[i]);
+            if (isNameKey && !normalizedQ.includes('name')) continue;
             return String(userData[keys[i]]);
         }
     }
@@ -621,7 +699,7 @@ const getAnswer = async (questionText, userData, context = {}) => {
     const normalized = normalizeText(questionText);
 
     // 1. Rule-based (deterministic, highest priority)
-    const ruleAnswer = ruleBasedMatch(normalized, userData);
+    const ruleAnswer = ruleBasedMatch(normalized, userData, context);
     if (ruleAnswer !== null) return ruleAnswer;
 
     // 2. Fuzzy matching (flexible fallback)

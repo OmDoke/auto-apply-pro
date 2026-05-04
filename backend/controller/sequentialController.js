@@ -88,7 +88,7 @@ const runSequence = async (prefs = {}) => {
         await runAgent('Post Scraper', path.join(__dirname, '..', 'agents', 'linkedinPostScraper.js'), prefs);
         await runAgent('Hirist Agent', path.join(__dirname, '..', 'agents', 'hiristAgent.js'), prefs);
         await runAgent('Naukri Agent', path.join(__dirname, '..', 'agents', 'naukriAgent.js'), prefs);
-        await runAgent('Indeed Agent', path.join(__dirname, '..', 'agents', 'indeedAgent.js'), prefs);
+        await runAgent('Indeed Agent', path.join(__dirname, '..', '..', 'run-indeed.js'), prefs);
         await runAgent('Glassdoor Agent', path.join(__dirname, '..', 'agents', 'glassdoorAgent.js'), prefs);
         await runAgent('Wellfound Agent', path.join(__dirname, '..', 'agents', 'wellfoundAgent.js'), prefs);
 
@@ -119,7 +119,7 @@ const runSingleAgent = async (agentId, prefs = {}) => {
         } else if (agentId === 'Naukri Agent') {
             await runAgent('Naukri Agent', path.join(__dirname, '..', 'agents', 'naukriAgent.js'), prefs);
         } else if (agentId === 'Indeed Agent') {
-            await runAgent('Indeed Agent', path.join(__dirname, '..', 'agents', 'indeedAgent.js'), prefs);
+            await runAgent('Indeed Agent', path.join(__dirname, '..', '..', 'run-indeed.js'), prefs);
         } else if (agentId === 'Glassdoor Agent') {
             await runAgent('Glassdoor Agent', path.join(__dirname, '..', 'agents', 'glassdoorAgent.js'), prefs);
         } else if (agentId === 'Wellfound Agent') {

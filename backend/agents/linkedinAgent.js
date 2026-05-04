@@ -332,10 +332,14 @@ const fillFormFields = async (page, answers) => {
             '.jobs-easy-apply-form-element__fields, ' +
             '.jobs-easy-apply-form-element, ' +
             'fieldset.fb-form-element, ' +
-            '.artdeco-form-item'
+            '.artdeco-form-item, ' +
+            '.artdeco-text-input--container'
         ));
         return groups.map((g, idx) => {
-            const labelEl = g.querySelector('label, .fb-dash-form-element__label, legend');
+            let labelEl = g.querySelector('label, .fb-dash-form-element__label, legend, .artdeco-text-input__label, .fb-form-element-label, span[data-test-form-builder-radio-button-form-component__title]');
+            if (!labelEl) {
+                labelEl = g.querySelector('span.t-14, h3.t-14, .jobs-easy-apply-form-element span[aria-hidden="true"], .jobs-easy-apply-form-section__grouping span.visually-hidden');
+            }
             let type = 'text';
             let options = [];
 
@@ -366,12 +370,17 @@ const fillFormFields = async (page, answers) => {
         const answer = await getAnswer(questionText, answers, { type, options });
         if (!answer) continue;
 
+        // NOTE: This selector MUST match the one used during group collection above
+        // (7 selectors including .artdeco-text-input--container) so that idx stays accurate.
         const groupSelector = '.jobs-easy-apply-form-section__grouping, ' +
             '.fb-dash-form-element, ' +
             '.jobs-easy-apply-form-element__fields, ' +
             '.jobs-easy-apply-form-element, ' +
             'fieldset.fb-form-element, ' +
-            '.artdeco-form-item';
+            '.artdeco-form-item, ' +
+            '.artdeco-text-input--container';
+
+        console.log(`  [Q${idx}] "${questionText}" (${type}) → answer: "${answer}"${options.length ? ' | options: ' + JSON.stringify(options.slice(0, 4)) : ''}`);
 
         if (type === 'select') {
             // Native <select> element
@@ -746,7 +755,7 @@ const run = async () => {
 
         const jobTitleEnv = process.env.FRONTEND_JOB_TITLE || process.env.JOB_TITLE || 'Software Engineer';
         const jobLocationEnv = process.env.FRONTEND_LOCATION || process.env.JOB_LOCATION || process.env.LOCATION || 'Remote';
-        const MAX_APPLICATIONS = 50;
+        const MAX_APPLICATIONS = parseInt(process.env.MAX_APPLICATIONS || '50', 10);
 
         console.log(`Searching for: ${jobTitleEnv} in ${jobLocationEnv}`);
         console.log('Filters: Easy Apply ON | Experience Level: Entry Level + Associate');

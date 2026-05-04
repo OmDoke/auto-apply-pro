@@ -180,3 +180,37 @@ backend/test-pdf-out.txt
 # AI agent tooling (not part of the deployable app)
 .agent/
 .env.example
+
+# ── Scratch / one-off dev scripts ──────────────────────────────────────────
+scratch_inspect.js
+backend/scratch_capture.js
+backend/scratch_extract.js
+backend/scratch_home.js
+backend/scratch_home_parse.js
+backend/scratch_inspect.js
+backend/scratch_parse.js
+backend/test-job.js
+backend/test-resume-parse.js
+
+# ── Captured DOM snapshots & debug screenshots (large HTML/PNG dumps) ──────
+backend/scratch/
+backend/indeed-auth-pw.html
+backend/indeed-auth-pw.png
+backend/indeed-error.png
+backend/indeed-login.html
+backend/test-job-output-body.html
+
+# ── Runtime / generated data (personal info, session state) ────────────────
+backend/data/resume.pdf
+backend/data/answers.json
+backend/data/failed_jobs.json
+backend/data/hiring_posts.json
+backend/data/leads.json
+backend/data/puppeteer/
+backend/data/playwright/
+
+# ── Root-level dev/personal files ──────────────────────────────────────────
+resume.pdf
+"console.error('ERROR"
+graphify-out/
+docs/*

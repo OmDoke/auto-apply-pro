@@ -26,5 +26,23 @@ export const apiService = {
 
   clearHiringPosts: async (): Promise<void> => {
     await axios.delete(`${API_BASE}/hiring-posts`);
-  }
+  },
+
+  openChrome: async (): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const res = await axios.post(`${API_BASE}/open-chrome`);
+      return res.data;
+    } catch (e: any) {
+      return { ok: false, message: e?.response?.data?.message || 'Failed to open Chrome' };
+    }
+  },
+
+  getChromeStatus: async (): Promise<boolean> => {
+    try {
+      const res = await axios.get(`${API_BASE}/chrome-status`);
+      return res.data.reachable === true;
+    } catch {
+      return false;
+    }
+  },
 };
