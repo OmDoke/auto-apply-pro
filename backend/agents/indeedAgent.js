@@ -312,13 +312,14 @@ class IndeedAgent extends BaseAgent {
             console.log(`[${this.agentName}] SmartApply step: ${currentStep}`);
 
             // ── Detect reCAPTCHA block — skip this job ──
-            const hasCaptcha = await applyPage.evaluate(() => {
+            const captchaStatus = await applyPage.evaluate(() => {
                 const body = (document.body.innerText || '').toLowerCase();
-                return body.includes('recaptcha') || body.includes('captcha') ||
-                    !!document.querySelector('iframe[src*="recaptcha"], .g-recaptcha');
+                const hasIframe = !!document.querySelector('iframe[src*="recaptcha"], .g-recaptcha');
+                const isChallenge = body.includes('please complete the recaptcha') || body.includes('security check');
+                return { hasIframe, isChallenge };
             });
-            if (hasCaptcha) {
-                console.log(`[${this.agentName}] 🛑 reCAPTCHA detected — skipping this job.`);
+            if (captchaStatus.hasIframe && captchaStatus.isChallenge) {
+                console.log(`[${this.agentName}] 🛑 reCAPTCHA challenge detected — skipping this job.`);
                 return false;
             }
 
@@ -349,7 +350,7 @@ class IndeedAgent extends BaseAgent {
                     }));
             });
 
-            console.log(`[${this.agentName}] Buttons: ${buttons.map(b => b.text || b.testId).join(' | ')}`);
+            console.log(`[${this.agentName}] Buttons: ${buttons.map(b => b.text || b.testId || b.cls).join(' | ')}`);
 
             const isReviewStep = currentStep === 'review-module';
 
@@ -425,11 +426,13 @@ class IndeedAgent extends BaseAgent {
                 });
                 if (hasErrors) {
                     console.log(`[${this.agentName}] ⚠️  Form errors detected, attempting to fix...`);
-                    await this.fillSmartApplyForm(applyPage, presetAnswers);
+                    await this.fillSmartApplyForm(applyPage, this.presetAnswers);
                 }
 
             } else {
-                console.log(`[${this.agentName}] No actionable button found. Stopping.`);
+                console.log(`[${this.agentName}] No actionable button found. Logging body snippet:`);
+                const bodySnippet = await applyPage.evaluate(() => document.body.innerText.substring(0, 500));
+                console.log(`[${this.agentName}] Body: ${bodySnippet}`);
                 break;
             }
         }
@@ -588,12 +591,23 @@ class IndeedAgent extends BaseAgent {
 
             await this.page.waitForSelector(cardSelector, { timeout: 10000 }).catch(() => { });
             let homeCards = await this.page.$$(cardSelector);
-            console.log(`[${this.agentName}] Found ${homeCards.length} cards on home feed.`);
+            const processedJobTitles = new Set();
 
             for (let i = 0; i < homeCards.length && !this.stopped; i++) {
                 try {
                     homeCards = await this.page.$$(cardSelector);
                     if (!homeCards[i]) break;
+
+                    const titleEl = await homeCards[i].$('.jcs-JobTitle span, h2.jobTitle span, .jobTitle a span, h2, .jobTitle')
+                        .catch(() => null);
+                    if (titleEl) {
+                        const title = await this.page.evaluate(el => el.innerText.trim(), titleEl);
+                        if (processedJobTitles.has(title)) {
+                            console.log(`[${this.agentName}] Skipping already processed job: ${title}`);
+                            continue;
+                        }
+                        processedJobTitles.add(title);
+                    }
 
                     const ok = await this.processJobCard(homeCards[i]);
                     if (ok) {
@@ -611,51 +625,9 @@ class IndeedAgent extends BaseAgent {
                 }
             }
 
-            // ── Phase 2: Search ────────────────────────────────────────────────
+            // ── Phase 2: Search (Removed as per user request) ────────────────────────────────────────────────
             if (!this.stopped) {
-                console.log(`\n[${this.agentName}] ═══ Phase 2: Search "${jobTitle}" ═══`);
-                await this.search(jobTitle, location);
-
-                let hasNextPage = true;
-                while (!this.stopped && hasNextPage) {
-                    await this.page.waitForSelector(cardSelector, { timeout: 8000 }).catch(() => { });
-                    let cards = await this.page.$$(cardSelector);
-                    console.log(`[${this.agentName}] Found ${cards.length} cards on search page.`);
-
-                    if (cards.length === 0) break;
-
-                    for (let i = 0; i < cards.length && !this.stopped; i++) {
-                        cards = await this.page.$$(cardSelector);
-                        if (!cards[i]) break;
-
-                        try {
-                            const ok = await this.processJobCard(cards[i]);
-                            if (ok) {
-                                appliedCount++;
-                                console.log(`[${this.agentName}] 🎉 Applied! Total so far: ${appliedCount}`);
-                            }
-                            await new Promise(r => setTimeout(r, 10000)); // pause between cards
-                        } catch (e) {
-                            if (e.message.includes('detached') || e.message.includes('destroyed')) {
-                                const pages = await this.browser.pages();
-                                this.page = pages[0];
-                                continue;
-                            }
-                            console.log(`[${this.agentName}] Card error: ${e.message}`);
-                        }
-                    }
-
-                    const nextBtn = await this.page.$(
-                        '[data-testid="pagination-page-next"], a[aria-label="Next Page"]'
-                    );
-                    if (nextBtn) {
-                        console.log(`[${this.agentName}] Going to next page...`);
-                        await nextBtn.click();
-                        await new Promise(r => setTimeout(r, 10000)); // wait for next page to load
-                    } else {
-                        hasNextPage = false;
-                    }
-                }
+                console.log(`\n[${this.agentName}] Skipping Search Phase as per configuration.`);
             }
 
             this.saveFailedJobs();

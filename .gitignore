@@ -182,6 +182,7 @@ backend/test-pdf-out.txt
 .env.example
 
 # ── Scratch / one-off dev scripts ──────────────────────────────────────────
+scratch/
 scratch_inspect.js
 backend/scratch_capture.js
 backend/scratch_extract.js
@@ -189,6 +190,7 @@ backend/scratch_home.js
 backend/scratch_home_parse.js
 backend/scratch_inspect.js
 backend/scratch_parse.js
+backend/verify_submission_local.js
 backend/test-job.js
 backend/test-resume-parse.js
 
