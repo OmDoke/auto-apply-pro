@@ -2,58 +2,73 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const http = require('http');
-const { spawn } = require('child_process');
 const { runSequence, runSingleAgent, stopSequence, getStatus } = require('../controller/sequentialController');
+const { launchChrome, getChromeStatus } = require('../services/chromeService');
 
-// ── Chrome launcher for Indeed Agent ──────────────────────────────────────────
-// Possible Chrome binary locations on Windows
-const CHROME_PATHS = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    process.env.CHROME_PATH || '',
-].filter(Boolean);
+/** ISO timestamp of when the server process started — used in /health. */
+const SERVER_START_TIME = new Date();
 
-let chromeProcess = null;
+/** Package version read once at import time. */
+const { version: APP_VERSION } = (() => {
+    try { return require('../../package.json'); } catch { return { version: 'unknown' }; }
+})();
 
-router.post('/open-chrome', (req, res) => {
-    const chromePath = CHROME_PATHS.find(p => fs.existsSync(p));
-    if (!chromePath) {
-        return res.status(500).json({ ok: false, message: 'Chrome not found. Set CHROME_PATH in .env' });
-    }
-    if (chromeProcess && !chromeProcess.killed) {
-        return res.json({ ok: true, message: 'Chrome already running.' });
-    }
+/**
+ * Middleware: attaches X-Response-Time header (ms) to every response.
+ * Useful for basic latency observability without a full APM setup.
+ */
+router.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        res.setHeader('X-Response-Time', `${Date.now() - start}ms`);
+    });
+    next();
+});
+
+router.post('/open-chrome', async (req, res) => {
     try {
-        chromeProcess = spawn(chromePath, [
-            '--remote-debugging-port=9222',
-            '--no-first-run',
-            '--no-default-browser-check',
-        ], { detached: true, stdio: 'ignore' });
-        chromeProcess.unref();
-        console.log(`[Chrome] Launched with remote debugging on port 9222 (pid ${chromeProcess.pid})`);
-        res.json({ ok: true, message: `Chrome launched (pid ${chromeProcess.pid})` });
+        const result = await launchChrome();
+        res.json(result);
     } catch (e) {
         res.status(500).json({ ok: false, message: e.message });
     }
 });
 
-router.get('/chrome-status', (req, res) => {
-    const options = { hostname: 'localhost', port: 9222, path: '/json/version', timeout: 2000 };
-    const probe = http.get(options, (r) => {
-        res.json({ reachable: r.statusCode === 200 });
-        probe.destroy();
-    });
-    probe.on('error', () => res.json({ reachable: false }));
-    probe.on('timeout', () => { probe.destroy(); res.json({ reachable: false }); });
+router.get('/chrome-status', async (req, res) => {
+    const reachable = await getChromeStatus();
+    res.json({ reachable });
 });
 
+
+/**
+ * GET /api/health
+ * Returns service health, uptime, and version — useful for monitoring and deploy checks.
+ */
 router.get('/health', (req, res) => {
-    res.json({ status: 'ok', message: 'Universal Job Agent backend is running' });
+    const uptimeSeconds = Math.floor((Date.now() - SERVER_START_TIME.getTime()) / 1000);
+    res.json({
+        status:     'ok',
+        version:    APP_VERSION,
+        uptime:     `${uptimeSeconds}s`,
+        startedAt:  SERVER_START_TIME.toISOString(),
+        timestamp:  new Date().toISOString(),
+        message:    'Universal Job Agent backend is running',
+    });
 });
 
+/**
+ * POST /api/start
+ * Starts either a single agent (if agentId provided) or the full sequence.
+ * Body: { agentId?: string, ...prefs }
+ */
 router.post('/start', (req, res) => {
     const prefs = req.body || {};
+
+    // Validate agentId if provided — must be a non-empty string
+    if ('agentId' in prefs && (typeof prefs.agentId !== 'string' || !prefs.agentId.trim())) {
+        return res.status(400).json({ ok: false, message: '"agentId" must be a non-empty string.' });
+    }
+
     if (prefs.agentId) {
         console.log(`[${new Date().toLocaleTimeString()}] POST /api/start for ${prefs.agentId} with params:`, prefs);
         runSingleAgent(prefs.agentId, prefs);
@@ -61,7 +76,7 @@ router.post('/start', (req, res) => {
         console.log(`[${new Date().toLocaleTimeString()}] POST /api/start - Initiating full sequence with params:`, prefs);
         runSequence(prefs);
     }
-    res.json({ message: 'Sequence initiated' });
+    res.json({ ok: true, message: 'Sequence initiated' });
 });
 
 router.post('/stop', (req, res) => {
@@ -88,10 +103,18 @@ router.get('/failed-jobs', async (req, res) => {
     }
 });
 
-router.delete('/failed-jobs', (req, res) => {
+/**
+ * DELETE /api/failed-jobs
+ * Clears the persisted failed-jobs list. Uses async I/O to avoid blocking the event loop.
+ */
+router.delete('/failed-jobs', async (req, res) => {
     const failedJobsPath = path.join(__dirname, '..', 'data', 'failed_jobs.json');
-    fs.writeFileSync(failedJobsPath, '[]');
-    res.json({ message: 'Failed jobs list cleared.' });
+    try {
+        await fs.promises.writeFile(failedJobsPath, '[]');
+        res.json({ ok: true, message: 'Failed jobs list cleared.' });
+    } catch (e) {
+        res.status(500).json({ ok: false, message: `Could not clear failed jobs: ${e.message}` });
+    }
 });
 
 router.get('/hiring-posts', async (req, res) => {
@@ -104,10 +127,39 @@ router.get('/hiring-posts', async (req, res) => {
     }
 });
 
-router.delete('/hiring-posts', (req, res) => {
+/**
+ * DELETE /api/hiring-posts
+ * Clears the persisted hiring-posts list. Uses async I/O to avoid blocking the event loop.
+ */
+router.delete('/hiring-posts', async (req, res) => {
     const hiringPostsPath = path.join(__dirname, '..', 'data', 'hiring_posts.json');
-    fs.writeFileSync(hiringPostsPath, '[]');
-    res.json({ message: 'Hiring posts list cleared.' });
+    try {
+        await fs.promises.writeFile(hiringPostsPath, '[]');
+        res.json({ ok: true, message: 'Hiring posts list cleared.' });
+    } catch (e) {
+        res.status(500).json({ ok: false, message: `Could not clear hiring posts: ${e.message}` });
+    }
+});
+
+router.get('/profile', async (req, res) => {
+    const profilePath = path.join(__dirname, '..', 'data', 'user_profile.json');
+    try {
+        const raw = await fs.promises.readFile(profilePath, 'utf8');
+        res.json(JSON.parse(raw));
+    } catch (e) {
+        res.status(500).json({ ok: false, message: 'Failed to read profile' });
+    }
+});
+
+router.post('/profile', async (req, res) => {
+    const profilePath = path.join(__dirname, '..', 'data', 'user_profile.json');
+    try {
+        const profile = req.body;
+        await fs.promises.writeFile(profilePath, JSON.stringify(profile, null, 2));
+        res.json({ ok: true, message: 'Profile updated successfully' });
+    } catch (e) {
+        res.status(500).json({ ok: false, message: 'Failed to update profile' });
+    }
 });
 
 module.exports = router;
