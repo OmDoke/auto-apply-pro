@@ -78,25 +78,35 @@ Question text
 ```
 
 ---
-## Getting Started
+---
+## Configuration
 
-### Prerequisites
-- Node.js (v18 or higher recommended)
-- npm
+Create a `.env` file in the root directory (copy from `.env.example`):
 
-### Installation
+```env
+GROQ_API_KEY=your_key_here
+CHROME_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"
+RESUME_NAME=resume.pdf
+JOB_TITLE="Software Engineer"
+LOCATION="Remote"
+```
 
-1. Clone the repository
-2. Install dependencies for root, frontend, and backend:
-   ```bash
-   npm run install:all
-   ```
+| Variable | Description |
+|----------|-------------|
+| **GROQ_API_KEY** | Required for AI-powered Q&A fallback. Get it from [Groq Console](https://console.groq.com/). |
+| **CHROME_PATH** | Absolute path to your Chrome executable. Required for Indeed automation. |
+| **RESUME_NAME** | Name of your resume file in `backend/data/`. |
+
+---
+## Features
+
+- **Profile Management**: Customize your contact info, experience, and preferences directly from the dashboard.
+- **Indeed Agent (Semi-Auto)**: Uses your local Chrome profile via remote debugging (port 9222) to bypass advanced bot detection.
+- **Automated Q&A**: Smart answer engine that learns from your profile and resume.
+- **Manual Review**: Any applications that require human intervention are saved for review.
 
 ### Running the Application
 
-To start both the frontend and backend servers simultaneously:
-```bash
-npm run dev
-```
-
-The frontend will start using Vite, and the backend Node.js server will launch handling Puppeteer automation requests.
+1. Install dependencies: `npm run install:all`
+2. Start the suite: `npm run dev`
+3. Open `http://localhost:5173`

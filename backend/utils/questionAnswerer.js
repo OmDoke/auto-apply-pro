@@ -30,7 +30,8 @@ const SKILL_TOKENS = [
     'ml', 'artificial intelligence', 'ai', 'data science', 'pandas',
     'numpy', 'tensorflow', 'pytorch', 'next.js', 'nextjs',
     'nest', 'nestjs', 'spring boot', 'kafka', 'rabbitmq', 'jenkins',
-    'ci/cd', 'terraform', 'ansible', 'elasticsearch'
+    'ci/cd', 'terraform', 'ansible', 'elasticsearch',
+    'software engineering', 'software development'
 ];
 
 // ---------------------------------------------------------------------------
@@ -44,12 +45,32 @@ const detectSalaryType = (normalizedQ) => {
     if (hasExpected && !hasCurrent) return 'expected';
     return 'unknown';
 };
+// ---------------------------------------------------------------------------
+// Load User Data from JSON profile
+// ---------------------------------------------------------------------------
+const path = require('path');
+const fs = require('fs');
+
+let loadedUserData = {};
+try {
+    const profilePath = process.env.USER_DATA_PATH 
+        ? path.resolve(process.env.USER_DATA_PATH)
+        : path.join(__dirname, '..', 'data', 'user_profile.json');
+    
+    if (fs.existsSync(profilePath)) {
+        loadedUserData = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+    }
+} catch (e) {
+    console.error('[QuestionAnswerer] Could not load user profile:', e.message);
+}
 
 // ---------------------------------------------------------------------------
 // Rule-based matcher — fast, deterministic, highest priority
 // Returns an answer string or null.
 // ---------------------------------------------------------------------------
 const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
+    // Merge provided userData with loaded profile (provided takes precedence)
+    const data = { ...loadedUserData, ...userData };
 
     // ---------- Notice period / Can you start immediately ----------
     if (normalizedQ.includes('notice') || normalizedQ.includes('joining') || normalizedQ.includes('how soon can you join') ||
@@ -60,9 +81,9 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
             if (context.options && context.options.length > 0) {
                 const opts = context.options.map(o => o.toLowerCase());
                 if (opts.includes('yes') && opts.includes('no')) {
-                    // "immediately" means right now — we can't, so No
+                    // "Can you start immediately?" → controlled by 'immediate start' in user_profile.json (default: 'Yes')
                     if (normalizedQ.includes('immediately') || normalizedQ.includes('immediate') || normalizedQ.includes('instant')) {
-                        return 'No';
+                        return String(data['immediate start'] ?? 'Yes');
                     }
                     // Generic yes/no for notice period → Yes (we are available)
                     return 'Yes';
@@ -80,7 +101,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
             }
             return '15 days';
         }
-        return userData['notice period'] ?? '15';
+        return data['notice period'] ?? '15';
     }
 
     // ---------- Salary / CTC / compensation — current vs expected ----------
@@ -93,13 +114,13 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('lpa')
     ) {
         const salaryType = detectSalaryType(normalizedQ);
-        if (salaryType === 'current') return '2';
-        if (salaryType === 'expected') return '6';
+        if (salaryType === 'current') return String(data['current salary'] ?? '2');
+        if (salaryType === 'expected') return String(data['expected salary'] ?? '6');
         // If question has ONLY "expected" wording in title
-        if (normalizedQ.includes('expected')) return '6';
-        if (normalizedQ.includes('current')) return '2';
+        if (normalizedQ.includes('expected')) return String(data['expected salary'] ?? '6');
+        if (normalizedQ.includes('current')) return String(data['current salary'] ?? '2');
         // Default: treat as current CTC
-        return '2';
+        return String(data['current salary'] ?? '2');
     }
 
     // ---------- Experience / years of experience ----------
@@ -108,17 +129,17 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
             const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const pattern = new RegExp(`\\b${escaped}\\b`);
             if (pattern.test(normalizedQ)) {
-                const skillKey = Object.keys(userData).find(k =>
+                const skillKey = Object.keys(data).find(k =>
                     normalizeText(k).includes(skill)
                 );
-                if (skillKey !== undefined && userData[skillKey] !== undefined) {
-                    return String(userData[skillKey]);
+                if (skillKey !== undefined && data[skillKey] !== undefined) {
+                    return String(data[skillKey]);
                 }
-                const generalExp = userData['experience'] ?? userData['years'] ?? null;
-                return generalExp !== null ? String(generalExp) : '0';
+                const generalExp = data['experience'] ?? data['years'] ?? null;
+                return generalExp !== null ? String(generalExp) : '1';
             }
         }
-        const exp = userData['experience'] ?? userData['years'] ?? null;
+        const exp = data['experience'] ?? data['years'] ?? '1';
         if (exp !== null) return String(exp);
     }
 
@@ -131,9 +152,9 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('work permit') ||
         normalizedQ.includes('work visa')
     ) {
-        const val = userData['authorized to work']
-            ?? userData['legally authorized']
-            ?? userData['authorized']
+        const val = data['authorized to work']
+            ?? data['legally authorized']
+            ?? data['authorized']
             ?? 'Yes';
         return String(val);
     }
@@ -145,8 +166,8 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('visa sponsorship') ||
         normalizedQ.includes('require sponsorship')
     ) {
-        const val = userData['sponsorship']
-            ?? userData['require sponsorship']
+        const val = data['sponsorship']
+            ?? data['require sponsorship']
             ?? 'No';
         return String(val);
     }
@@ -157,7 +178,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('willing to move') ||
         normalizedQ.includes('open to reloc')
     ) {
-        const val = userData['relocate'] ?? userData['relocation'] ?? 'Yes';
+        const val = data['relocate'] ?? data['relocation'] ?? 'Yes';
         return String(val);
     }
 
@@ -167,28 +188,28 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('work from home') ||
         normalizedQ.includes('hybrid')
     ) {
-        const val = userData['remote'] ?? 'Yes';
+        const val = data['remote'] ?? 'Yes';
         return String(val);
     }
 
     // ---------- Gender ----------
     if (normalizedQ.includes('gender')) {
-        return String(userData['gender'] ?? 'Decline to self-identify');
+        return String(data['gender'] ?? 'Decline to self-identify');
     }
 
     // ---------- Disability ----------
     if (normalizedQ.includes('disabilit')) {
-        return String(userData['disability'] ?? "No, I don't have a disability");
+        return String(data['disability'] ?? "No, I don't have a disability");
     }
 
     // ---------- Veteran ----------
     if (normalizedQ.includes('veteran') || normalizedQ.includes('military')) {
-        return String(userData['veteran'] ?? 'I am not a protected veteran');
+        return String(data['veteran'] ?? 'I am not a protected veteran');
     }
 
     // ---------- Race / ethnicity ----------
     if (normalizedQ.includes('race') || normalizedQ.includes('ethnic')) {
-        return String(userData['race'] ?? 'Decline to self-identify');
+        return String(data['race'] ?? 'Decline to self-identify');
     }
 
     // ---------- Phone / Mobile number (must come BEFORE fuzzy to avoid surname match) ----------
@@ -208,7 +229,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
             // generic country-code dropdown: first non-empty option
             return context.options[0];
         }
-        return String(userData['phone'] ?? userData['mobile'] ?? userData['contact'] ?? '');
+        return String(data['phone'] ?? data['mobile'] ?? data['contact'] ?? '');
     }
 
     // ---------- Pincode / Zip / Postal code ----------
@@ -220,7 +241,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('zip') ||
         normalizedQ.includes('postal')
     ) {
-        return String(userData['pincode'] ?? userData['zip'] ?? '412207');
+        return String(data['pincode'] ?? data['zip'] ?? '412207');
     }
 
     // ---------- Street / Address ----------
@@ -232,27 +253,35 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('flat') ||
         normalizedQ.includes('society')
     ) {
-        return String(userData['street'] ?? userData['address'] ?? 'Sai Park Society, Wagholi');
+        return String(data['street'] ?? data['address'] ?? 'Sai Park Society, Wagholi');
     }
 
     // ---------- Full address ----------
     if (normalizedQ === 'address' || normalizedQ.includes('full address') || normalizedQ.includes('current address')) {
-        return String(userData['address'] ?? 'Sai Park Society, Wagholi, Pune, Maharashtra, India - 412207');
+        return String(data['address'] ?? 'Sai Park Society, Wagholi, Pune, Maharashtra, India - 412207');
     }
 
     // ---------- City (return just "Pune" for city inputs) ----------
     if (normalizedQ.includes('city') && !normalizedQ.includes('address')) {
-        return String(userData['city'] ?? 'Pune');
+        return String(data['city'] ?? 'Pune');
     }
 
     // ---------- State ----------
-    if (normalizedQ.includes('state') && !normalizedQ.includes('united states') && !normalizedQ.includes('us state')) {
-        return String(userData['state'] ?? 'Maharashtra');
+    if (
+        normalizedQ.includes('state') &&
+        !normalizedQ.includes('united states') &&
+        !normalizedQ.includes('us state') &&
+        !normalizedQ.includes('state management') &&
+        !normalizedQ.includes('manage') &&
+        !normalizedQ.includes('statement') &&
+        !normalizedQ.includes('understanding')
+    ) {
+        return String(data['state'] ?? 'Maharashtra');
     }
 
     // ---------- Country ----------
     if (normalizedQ.includes('country') || normalizedQ.includes('nation')) {
-        return String(userData['country'] ?? 'India');
+        return String(data['country'] ?? 'India');
     }
 
     // ---------- Education / Degree ----------
@@ -272,24 +301,26 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
                 return 'Yes';
             }
         }
-        const val = userData['education'] ?? userData['degree'] ?? 'Post Graduate Diploma in Advanced Computing (PG-DAC)';
+        const val = data['education'] ?? data['degree'] ?? 'Post Graduate Diploma in Advanced Computing (PG-DAC)';
         return String(val);
     }
 
     // ---------- English / language proficiency ----------
     if (
-        normalizedQ.includes('english') ||
+        (normalizedQ.includes('english') ||
         normalizedQ.includes('language') ||
         normalizedQ.includes('fluent') ||
-        normalizedQ.includes('proficiency')
+        normalizedQ.includes('proficiency')) &&
+        !normalizedQ.includes('programming') &&
+        !normalizedQ.includes('how many')
     ) {
-        const val = userData['english'] ?? userData['language'] ?? 'Professional / Fluent';
+        const val = data['english'] ?? data['language'] ?? 'Professional / Fluent';
         return String(val);
     }
 
     // ---------- Security clearance ----------
     if (normalizedQ.includes('clearance') || normalizedQ.includes('security clearance')) {
-        return String(userData['clearance'] ?? 'No');
+        return String(data['clearance'] ?? 'No');
     }
 
     // ---------- Website / Portfolio / Github / LinkedIn ----------
@@ -301,14 +332,14 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('link') ||
         normalizedQ.includes('url')
     ) {
-        if (normalizedQ.includes('github')) return String(userData['github'] ?? userData['portfolio'] ?? '');
-        if (normalizedQ.includes('linkedin')) return String(userData['linkedin'] ?? userData['portfolio'] ?? '');
-        return String(userData['portfolio'] ?? userData['website'] ?? userData['link'] ?? '');
+        if (normalizedQ.includes('github')) return String(data['github'] ?? data['portfolio'] ?? '');
+        if (normalizedQ.includes('linkedin')) return String(data['linkedin'] ?? data['portfolio'] ?? '');
+        return String(data['portfolio'] ?? data['website'] ?? data['link'] ?? '');
     }
 
     // ---------- Pronouns ----------
     if (normalizedQ.includes('pronoun')) {
-        return String(userData['pronouns'] ?? 'He/Him');
+        return String(data['pronouns'] ?? 'He/Him');
     }
 
     // ---------- Drug test ----------
@@ -347,7 +378,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         (normalizedQ.includes('family') || normalizedQ.includes('close friend')) &&
         (normalizedQ.includes('employed') || normalizedQ.includes('relationship') || normalizedQ.includes('work'))
     ) {
-        return String(userData['family at company'] ?? 'No');
+        return String(data['family at company'] ?? 'No');
     }
 
     // ---------- Highest education level (dropdown) ----------
@@ -358,7 +389,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('educational background') ||
         normalizedQ.includes('highest qualification')
     ) {
-        return String(userData['education level'] ?? userData['education'] ?? "Bachelor's Degree");
+        return String(data['education level'] ?? data['education'] ?? "Bachelor's Degree");
     }
 
     // ---------- Graduation year ----------
@@ -368,7 +399,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('when did you graduate') ||
         normalizedQ.includes('year of passing')
     ) {
-        return String(userData['graduation year'] ?? '2024');
+        return String(data['graduation year'] ?? '2024');
     }
 
     // ---------- Start date / available from ----------
@@ -378,7 +409,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('earliest start') ||
         normalizedQ.includes('when can you start')
     ) {
-        return String(userData['start date'] ?? '15 days');
+        return String(data['start date'] ?? '15 days');
     }
 
     // ---------- Currently employed / working ----------
@@ -388,7 +419,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('current employment status') ||
         normalizedQ.includes('are you currently working')
     ) {
-        return String(userData['currently employed'] ?? 'No');
+        return String(data['currently employed'] ?? 'No');
     }
 
     // ---------- Total / overall years of experience ----------
@@ -397,9 +428,11 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('overall experience') ||
         normalizedQ.includes('total work experience') ||
         normalizedQ.includes('years of professional experience') ||
-        normalizedQ.includes('how many years of experience')
+        normalizedQ.includes('years of professional software') ||
+        normalizedQ.includes('how many years of experience') ||
+        (normalizedQ.includes('years') && normalizedQ.includes('experience'))
     ) {
-        return String(userData['experience'] ?? userData['years'] ?? '1');
+        return String(data['experience'] ?? data['years'] ?? '1');
     }
 
     // ---------- Relevant experience for THIS role ----------
@@ -409,18 +442,18 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         (normalizedQ.includes('experience') && normalizedQ.includes('this role')) ||
         (normalizedQ.includes('experience') && normalizedQ.includes('this position'))
     ) {
-        return String(userData['experience'] ?? '1');
+        return String(data['experience'] ?? '1');
     }
 
     // ---------- Full Stack / Frontend / Backend ----------
     if (normalizedQ.includes('full stack') || normalizedQ.includes('fullstack')) {
-        return String(userData['full stack'] ?? userData['experience'] ?? '1');
+        return String(data['full stack'] ?? data['experience'] ?? '1');
     }
     if (normalizedQ.includes('frontend') || normalizedQ.includes('front end') || normalizedQ.includes('front-end')) {
-        return String(userData['frontend'] ?? userData['react'] ?? '1');
+        return String(data['frontend'] ?? data['react'] ?? '1');
     }
     if (normalizedQ.includes('backend') || normalizedQ.includes('back end') || normalizedQ.includes('back-end')) {
-        return String(userData['backend'] ?? userData['node'] ?? '1');
+        return String(data['backend'] ?? data['node'] ?? '1');
     }
 
     // ---------- Willing to work on-site / in office ----------
@@ -432,7 +465,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('work from office') ||
         normalizedQ.includes('wfo')
     ) {
-        return String(userData['onsite'] ?? 'Yes');
+        return String(data['onsite'] ?? 'Yes');
     }
 
     // ---------- Shift / timing flexibility ----------
@@ -444,7 +477,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('us shift') ||
         normalizedQ.includes('us hours')
     ) {
-        return String(userData['shift'] ?? 'Yes');
+        return String(data['shift'] ?? 'Yes');
     }
 
     // ---------- Internship / fresher ----------
@@ -453,7 +486,15 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('fresher') ||
         normalizedQ.includes('fresh graduate')
     ) {
-        return String(userData['experience'] ?? '1');
+        // If this is a Yes/No question (e.g. "Are you comfortable with a 3-month unpaid internship?"),
+        // don't return an experience number — fall through to AI/default.
+        if (context.options && context.options.length > 0) {
+            const lowerOpts = context.options.map(o => o.toLowerCase());
+            if (lowerOpts.includes('yes') && lowerOpts.includes('no')) {
+                return 'Yes';
+            }
+        }
+        return String(data['experience'] ?? '1');
     }
 
     // ---------- Previously applied / worked at this company ----------
@@ -461,7 +502,25 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         (normalizedQ.includes('previously') || normalizedQ.includes('before') || normalizedQ.includes('before this')) &&
         (normalizedQ.includes('applied') || normalizedQ.includes('worked') || normalizedQ.includes('employed'))
     ) {
-        return String(userData['previously applied'] ?? 'No');
+        return String(data['previously applied'] ?? 'No');
+    }
+
+    // ---------- PRs Shipped / AI Coding Agent ----------
+    if (normalizedQ.includes('prs') || normalizedQ.includes('pull requests') || (normalizedQ.includes('how many') && normalizedQ.includes('shipped'))) {
+        return String(data['prs shipped'] ?? '50');
+    }
+    if (
+        normalizedQ.includes('ai coding agent') || 
+        normalizedQ.includes('ai generated') ||
+        normalizedQ.includes('copilot') ||
+        normalizedQ.includes('cursor') ||
+        (normalizedQ.includes('ai') && normalizedQ.includes('implementation'))
+    ) {
+        return 'Yes';
+    }
+    
+    if (normalizedQ.includes('programming language') && normalizedQ.includes('how many')) {
+        return String(data['programming languages'] ?? 'JavaScript, Java, SQL');
     }
 
     // ---------- Referral / referred by ----------
@@ -471,12 +530,12 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         (normalizedQ.includes('how did you hear') && normalizedQ.includes('this job')) ||
         normalizedQ.includes('source of application')
     ) {
-        return String(userData['referral'] ?? 'LinkedIn');
+        return String(data['referral'] ?? 'LinkedIn');
     }
 
     // ---------- Cover letter ----------
     if (normalizedQ.includes('cover letter') || (normalizedQ.includes('additional information') && normalizedQ.includes('yourself'))) {
-        return String(userData['cover letter'] ??
+        return String(data['cover letter'] ??
             'I am a motivated Full Stack Developer with hands-on experience in React.js, Node.js, Spring Boot, and MySQL. ' +
             'I am eager to contribute to your team and grow with the company.');
     }
@@ -488,7 +547,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('brief introduction') ||
         (normalizedQ.includes('summary') && !normalizedQ.includes('salary'))
     ) {
-        return String(userData['summary'] ??
+        return String(data['summary'] ??
             'Full Stack Developer with 1 year of experience in React.js, Node.js, Spring Boot, and MySQL. ' +
             'CDAC certified. Passionate about building scalable, secure applications.');
     }
@@ -500,7 +559,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('why are you interested') ||
         normalizedQ.includes('why should we hire')
     ) {
-        return String(userData['why us'] ??
+        return String(data['why us'] ??
             'I am impressed by your company\'s work and believe my skills in full-stack development align well with this role. ' +
             'I am eager to contribute and grow within your team.');
     }
@@ -514,7 +573,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('contract') ||
         normalizedQ.includes('permanent')
     ) {
-        return String(userData['job type'] ?? 'Full-time');
+        return String(data['job type'] ?? 'Full-time');
     }
 
     // ---------- Date of birth ----------
@@ -523,17 +582,17 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('dob') ||
         normalizedQ.includes('birth date')
     ) {
-        return String(userData['dob'] ?? userData['date of birth'] ?? '');
+        return String(data['dob'] ?? data['date of birth'] ?? '');
     }
 
     // ---------- Nationality ----------
     if (normalizedQ.includes('nationalit')) {
-        return String(userData['nationality'] ?? 'Indian');
+        return String(data['nationality'] ?? 'Indian');
     }
 
     // ---------- Marital status ----------
     if (normalizedQ.includes('marital')) {
-        return String(userData['marital status'] ?? 'Single');
+        return String(data['marital status'] ?? 'Single');
     }
 
     // ---------- Languages known ----------
@@ -542,12 +601,12 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         (normalizedQ.includes('language') && normalizedQ.includes('speak')) ||
         normalizedQ.includes('languages you know')
     ) {
-        return String(userData['languages known'] ?? 'English, Hindi, Marathi');
+        return String(data['languages known'] ?? 'English, Hindi, Marathi');
     }
 
     // ---------- Passport ----------
     if (normalizedQ.includes('passport')) {
-        return String(userData['passport'] ?? 'Yes');
+        return String(data['passport'] ?? 'Yes');
     }
 
     // ---------- Background check consent ----------
@@ -565,7 +624,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('service agreement') ||
         normalizedQ.includes('sign a bond')
     ) {
-        return String(userData['bond'] ?? 'Yes');
+        return String(data['bond'] ?? 'Yes');
     }
 
     // ---------- Overtime / extended hours ----------
@@ -574,7 +633,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('extended hours') ||
         normalizedQ.includes('work extra hours')
     ) {
-        return String(userData['overtime'] ?? 'Yes');
+        return String(data['overtime'] ?? 'Yes');
     }
 
     // ---------- Travel required ----------
@@ -582,22 +641,22 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('travel') &&
         (normalizedQ.includes('willing') || normalizedQ.includes('open') || normalizedQ.includes('require'))
     ) {
-        return String(userData['travel'] ?? 'Yes');
+        return String(data['travel'] ?? 'Yes');
     }
 
     // ---------- LinkedIn profile URL (standalone field) ----------
     if (normalizedQ === 'linkedin' || normalizedQ === 'linkedin profile' || normalizedQ === 'linkedin url') {
-        return String(userData['linkedin'] ?? 'https://www.linkedin.com/in/onkar-doke');
+        return String(data['linkedin'] ?? 'https://www.linkedin.com/in/onkar-doke');
     }
 
     // ---------- GitHub profile URL (standalone field) ----------
     if (normalizedQ === 'github' || normalizedQ === 'github profile' || normalizedQ === 'github url') {
-        return String(userData['github'] ?? 'https://github.com/OmDoke');
+        return String(data['github'] ?? 'https://github.com/OmDoke');
     }
 
     // ---------- CTC in hand (take home) ----------
     if (normalizedQ.includes('in hand') || normalizedQ.includes('take home') || normalizedQ.includes('net salary')) {
-        return String(userData['in hand salary'] ?? '1.7');
+        return String(data['in hand salary'] ?? '1.7');
     }
 
     // ---------- Hike / increment expected ----------
@@ -606,14 +665,14 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('increment') ||
         (normalizedQ.includes('salary') && normalizedQ.includes('increase'))
     ) {
-        return String(userData['expected hike'] ?? '30');
+        return String(data['expected hike'] ?? '30');
     }
 
     // ---------- Number of offers / current offers ----------
     if (
         normalizedQ.includes('offer') && (normalizedQ.includes('hand') || normalizedQ.includes('current'))
     ) {
-        return String(userData['offers in hand'] ?? '0');
+        return String(data['offers in hand'] ?? '0');
     }
 
     // ---------- Certifications ----------
@@ -622,7 +681,7 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('certified') ||
         normalizedQ.includes('certificate')
     ) {
-        return String(userData['certifications'] ?? 'PG-DAC from CDAC Pune');
+        return String(data['certifications'] ?? 'PG-DAC from CDAC Pune');
     }
 
     // ---------- Preferred work location ----------
@@ -632,21 +691,21 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('preferred city') ||
         normalizedQ.includes('location preference')
     ) {
-        return String(userData['preferred location'] ?? 'Pune, Mumbai, Bangalore, Remote');
+        return String(data['preferred location'] ?? 'Pune, Mumbai, Bangalore, Remote');
     }
 
     // ---------- Email address ----------
     if (normalizedQ.includes('email')) {
         // If it's a select/dropdown with options, pick the matching email or first available
         if (context.options && context.options.length > 0) {
-            const ourEmail = String(userData['email'] ?? '').toLowerCase();
+            const ourEmail = String(data['email'] ?? '').toLowerCase();
             const match = context.options.find(o =>
                 o.toLowerCase() === ourEmail ||
                 (ourEmail.split('@')[0] && o.toLowerCase().split('@')[0] === ourEmail.split('@')[0])
             );
             return match || context.options[0];
         }
-        return String(userData['email'] ?? '');
+        return String(data['email'] ?? '');
     }
 
     return null;
@@ -657,7 +716,10 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
 // Returns the best-matching value from userData, or null.
 // ---------------------------------------------------------------------------
 const getBestFuzzyMatch = (normalizedQ, userData) => {
-    const keys = Object.keys(userData);
+    // Merge with loaded profile
+    const data = { ...loadedUserData, ...userData };
+    
+    const keys = Object.keys(data);
     if (keys.length === 0) return null;
 
     const normalizedKeys = keys.map(k => normalizeText(k));
@@ -674,7 +736,7 @@ const getBestFuzzyMatch = (normalizedQ, userData) => {
         const isNameKey = ['first name', 'last name', 'full name'].includes(matchedKey.toLowerCase());
         const isNameQuestion = normalizedQ.includes('name');
         if (isNameKey && !isNameQuestion) return null;
-        return String(userData[matchedKey]);
+        return String(data[matchedKey]);
     }
 
     // Secondary pass: check if any key is a substring of the question
@@ -683,12 +745,13 @@ const getBestFuzzyMatch = (normalizedQ, userData) => {
             // Safety: skip name keys for non-name questions
             const isNameKey = ['first name', 'last name', 'full name'].includes(normalizedKeys[i]);
             if (isNameKey && !normalizedQ.includes('name')) continue;
-            return String(userData[keys[i]]);
+            return String(data[keys[i]]);
         }
     }
 
     return null;
 };
+
 
 // ---------------------------------------------------------------------------
 // Main exported function — async (supports AI fallback)
@@ -699,7 +762,23 @@ const getAnswer = async (questionText, userData, context = {}) => {
     const normalized = normalizeText(questionText);
 
     // 1. Rule-based (deterministic, highest priority)
-    const ruleAnswer = ruleBasedMatch(normalized, userData, context);
+    let ruleAnswer = ruleBasedMatch(normalized, userData, context);
+
+    // Universal guard: if the field only accepts Yes/No options, make sure our answer is one of them.
+    // This prevents rules like 'state' or 'internship' from returning 'Maharashtra' or '1'
+    // when the dropdown only has ["Yes", "No"].
+    if (ruleAnswer !== null && context.options && context.options.length > 0) {
+        const lowerOpts = context.options.map(o => o.toLowerCase());
+        const isYesNoField = lowerOpts.includes('yes') && lowerOpts.includes('no') && context.options.length <= 3;
+        if (isYesNoField) {
+            const ruleAnswerLower = ruleAnswer.toLowerCase();
+            if (!lowerOpts.includes(ruleAnswerLower)) {
+                // Rule answer is not a valid option — discard it and let AI/fallback decide
+                ruleAnswer = null;
+            }
+        }
+    }
+
     if (ruleAnswer !== null) return ruleAnswer;
 
     // 2. Fuzzy matching (flexible fallback)
@@ -711,7 +790,7 @@ const getAnswer = async (questionText, userData, context = {}) => {
     if (aiAnswer !== null) return aiAnswer;
 
     // 4. Final safety-net: obvious yes/no questions default to "Yes"
-    const isYesNo = /\b(are you|do you|have you|can you|will you|would you|is your|were you|did you)\b/i.test(questionText);
+    const isYesNo = /\b(are you|do you|have you|can you|will you|would you|is your|were you|did you)\b/i.test(questionText) && !/\b(how many|how much|what|who|where|when|why|describe|explain)\b/i.test(questionText);
     if (isYesNo) return 'Yes';
 
     return null;

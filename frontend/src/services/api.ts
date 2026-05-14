@@ -45,4 +45,22 @@ export const apiService = {
       return false;
     }
   },
+
+  getProfile: async (): Promise<any> => {
+    try {
+      const res = await axios.get(`${API_BASE}/profile`);
+      return res.data;
+    } catch {
+      return null;
+    }
+  },
+
+  updateProfile: async (profile: any): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const res = await axios.post(`${API_BASE}/profile`, profile);
+      return res.data;
+    } catch (e: any) {
+      return { ok: false, message: e?.response?.data?.message || 'Failed to update profile' };
+    }
+  },
 };
