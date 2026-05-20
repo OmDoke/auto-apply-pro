@@ -760,34 +760,67 @@ const getAnswer = async (questionText, userData, context = {}) => {
     if (!questionText || !userData) return null;
 
     const normalized = normalizeText(questionText);
+    const llmFirst = process.env.LLM_FIRST === 'true';
 
-    // 1. Rule-based (deterministic, highest priority)
-    let ruleAnswer = ruleBasedMatch(normalized, userData, context);
+    // List of keywords that warrant dynamic LLM reasoning
+    const DYNAMIC_KEYWORDS = [
+        'experience', 'years', 'notice', 'joining', 'salary', 'ctc',
+        'compensation', 'package', 'lpa', 'sponsorship', 'sponsor',
+        'relocat', 'remote', 'work from home', 'education', 'degree',
+        'bachelor', 'master', 'phd', 'graduation', 'certificat',
+        'cover letter', 'summary', 'about yourself', 'why us'
+    ];
 
-    // Universal guard: if the field only accepts Yes/No options, make sure our answer is one of them.
-    // This prevents rules like 'state' or 'internship' from returning 'Maharashtra' or '1'
-    // when the dropdown only has ["Yes", "No"].
-    if (ruleAnswer !== null && context.options && context.options.length > 0) {
-        const lowerOpts = context.options.map(o => o.toLowerCase());
-        const isYesNoField = lowerOpts.includes('yes') && lowerOpts.includes('no') && context.options.length <= 3;
-        if (isYesNoField) {
-            const ruleAnswerLower = ruleAnswer.toLowerCase();
-            if (!lowerOpts.includes(ruleAnswerLower)) {
-                // Rule answer is not a valid option — discard it and let AI/fallback decide
-                ruleAnswer = null;
+    const isDynamicQuestion = DYNAMIC_KEYWORDS.some(kw => normalized.includes(kw));
+
+    // Helper to evaluate static rules and fuzzy matches
+    const getStaticAnswer = (normQ, uData, ctx) => {
+        let ruleAnswer = ruleBasedMatch(normQ, uData, ctx);
+        if (ruleAnswer !== null && ctx.options && ctx.options.length > 0) {
+            const lowerOpts = ctx.options.map(o => o.toLowerCase());
+            const isYesNoField = lowerOpts.includes('yes') && lowerOpts.includes('no') && ctx.options.length <= 3;
+            if (isYesNoField) {
+                const ruleAnswerLower = ruleAnswer.toLowerCase();
+                if (!lowerOpts.includes(ruleAnswerLower)) {
+                    // Rule answer is not a valid option — discard it and let AI/fallback decide
+                    ruleAnswer = null;
+                }
             }
         }
+        if (ruleAnswer !== null) return ruleAnswer;
+
+        const fuzzyAnswer = getBestFuzzyMatch(normQ, uData);
+        if (fuzzyAnswer !== null) return fuzzyAnswer;
+
+        return null;
+    };
+
+    // Flow 1: LLM First override
+    if (llmFirst) {
+        const aiAnswer = await getAIAnswer(questionText, context, userData);
+        if (aiAnswer !== null) return aiAnswer;
+
+        // Fallback to rules/fuzzy
+        const staticAnswer = getStaticAnswer(normalized, userData, context);
+        if (staticAnswer !== null) return staticAnswer;
+    } else {
+        // Flow 2: Smart Hybrid
+        // If it's a dynamic question, try LLM first
+        if (isDynamicQuestion) {
+            const aiAnswer = await getAIAnswer(questionText, context, userData);
+            if (aiAnswer !== null) return aiAnswer;
+        }
+
+        // Try static/rules + fuzzy matching
+        const staticAnswer = getStaticAnswer(normalized, userData, context);
+        if (staticAnswer !== null) return staticAnswer;
+
+        // If not matched yet, and it wasn't dynamic, try LLM as fallback
+        if (!isDynamicQuestion) {
+            const aiAnswer = await getAIAnswer(questionText, context, userData);
+            if (aiAnswer !== null) return aiAnswer;
+        }
     }
-
-    if (ruleAnswer !== null) return ruleAnswer;
-
-    // 2. Fuzzy matching (flexible fallback)
-    const fuzzyAnswer = getBestFuzzyMatch(normalized, userData);
-    if (fuzzyAnswer !== null) return fuzzyAnswer;
-
-    // 3. AI fallback via Groq + resume context
-    const aiAnswer = await getAIAnswer(questionText, context);
-    if (aiAnswer !== null) return aiAnswer;
 
     // 4. Final safety-net: obvious yes/no questions default to "Yes"
     const isYesNo = /\b(are you|do you|have you|can you|will you|would you|is your|were you|did you)\b/i.test(questionText) && !/\b(how many|how much|what|who|where|when|why|describe|explain)\b/i.test(questionText);
