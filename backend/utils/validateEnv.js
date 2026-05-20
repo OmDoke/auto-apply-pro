@@ -1,7 +1,7 @@
 'use strict';
 
 const REQUIRED_VARS = ['GROQ_API_KEY'];
-const RECOMMENDED_VARS = ['JOB_TITLE', 'RESUME_NAME'];
+const RECOMMENDED_VARS = ['JOB_TITLE', 'RESUME_NAME', 'GROQ_MODEL', 'LLM_FIRST'];
 
 function validateEnv() {
     const missing = REQUIRED_VARS.filter(v => !process.env[v]);
