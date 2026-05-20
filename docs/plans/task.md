@@ -2,9 +2,7 @@
 
 | # | Task | Status |
 |---|---|---|
-| 1 | Explore project context — check files, docs, recent commits | completed |
-| 2 | Ask clarifying questions | completed |
-| 3 | Propose 2-3 approaches | completed |
-| 4 | Present design | in_progress |
-| 5 | Write design doc | not_started |
-| 6 | Transition to implementation | not_started |
+| 1 | Task 1: Update Environment Configuration (validateEnv.js, .env.example) | not_started |
+| 2 | Task 2: Update LLM Client and Prompt with Profile Context (resumeQA.js) | not_started |
+| 3 | Task 3: Refactor questionAnswerer Precedence and Rules (questionAnswerer.js) | not_started |
+| 4 | Task 4: Add Unit Tests and Verify (questionAnswerer.test.js) | not_started |
