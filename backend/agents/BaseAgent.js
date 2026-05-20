@@ -13,6 +13,32 @@ const fs = require('fs');
 const path = require('path');
 const { getAnswer } = require('../utils/questionAnswerer');
 
+// ── Timing constants (ms) — centralised so they are easy to tune —————————
+/** Default navigation / page-load timeout. */
+const NAV_TIMEOUT_MS       = 60_000;
+/** Default element-wait / interaction timeout. */
+const INTERACTION_TIMEOUT_MS = 15_000;
+/** Short pause between form-step interactions. */
+const STEP_DELAY_MS        = 1_500;
+/** Short pause after clicking a button. */
+const CLICK_DELAY_MS       = 1_500;
+/** Pause after submit before checking for confirmation. */
+const SUBMIT_DELAY_MS      = 2_500;
+/** Pause after dismissing a modal. */
+const DISMISS_DELAY_MS     = 1_000;
+/** Brief settle pause after filling fields. */
+const FIELD_SETTLE_MS      = 500;
+/** Maximum number of form wizard steps before bailing out. */
+const MAX_WIZARD_STEPS     = 20;
+
+/**
+ * Promisified sleep helper — replaces scattered `new Promise(r => setTimeout(r, N))`.
+ *
+ * @param {number} ms - Milliseconds to wait.
+ * @returns {Promise<void>}
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 class BaseAgent {
     constructor(agentName, userDataDirFolder) {
         this.agentName = agentName;
@@ -75,11 +101,17 @@ class BaseAgent {
         }
     }
 
+    /**
+     * Initialises a Puppeteer browser instance with stealth evasions applied
+     * and opens the first page, pre-configured with viewport and timeouts.
+     *
+     * @returns {Promise<{ browser: import('puppeteer').Browser, page: import('puppeteer').Page }>}
+     */
     async initializeBrowser() {
         console.log(`[${this.agentName}] Initializing browser...`);
         this.browser = await puppeteer.launch({
             headless: false,
-            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            executablePath: process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
             userDataDir: this.userDataDir,
             args: [
                 '--no-sandbox',
@@ -97,9 +129,8 @@ class BaseAgent {
         });
         this.page = await this.browser.newPage();
         await this.page.setViewport({ width: 1280, height: 800 });
-        this.page.setDefaultNavigationTimeout(60000);
-        this.page.setDefaultTimeout(15000);
-        
+        this.page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
+        this.page.setDefaultTimeout(INTERACTION_TIMEOUT_MS);
         return { browser: this.browser, page: this.page };
     }
 
@@ -122,11 +153,17 @@ class BaseAgent {
     }
 
     // --- Form Wizard Logic (Common across many Easy Apply flows) ---
+    /**
+     * Attempts to dismiss an open Easy Apply / application modal.
+     * Clicks the Dismiss button and confirms the discard dialog if it appears.
+     *
+     * @returns {Promise<void>}
+     */
     async discardModal() {
         try {
             const dismissBtn = await this.page.$('button[aria-label="Dismiss"]');
             if (dismissBtn) await dismissBtn.click();
-            await new Promise(r => setTimeout(r, 1000));
+            await sleep(DISMISS_DELAY_MS);
             // Confirm discard if prompted
             await this.page.evaluate(() => {
                 const btns = Array.from(document.querySelectorAll('button'));
@@ -137,7 +174,7 @@ class BaseAgent {
                     }
                 }
             });
-            await new Promise(r => setTimeout(r, 800));
+            await sleep(FIELD_SETTLE_MS);
         } catch (e) {}
     }
 
@@ -223,7 +260,7 @@ class BaseAgent {
             }, { idx, answer });
         }
 
-        await new Promise(r => setTimeout(r, 500));
+        await sleep(FIELD_SETTLE_MS);
     }
 
     async handleResumeStep(resumePath, targetResume) {
@@ -269,6 +306,18 @@ class BaseAgent {
         }
     }
 
+    /**
+     * Orchestrates the full Easy Apply wizard flow for a single job.
+     * Loops through form steps (up to MAX_WIZARD_STEPS), filling fields and
+     * clicking Next / Review / Submit as appropriate.
+     *
+     * @param {object} jobInfo                  - Basic info about the job being applied to.
+     * @param {object} presetAnswers            - Key/value map of pre-configured form answers.
+     * @param {string} resumePath               - Absolute path to the resume PDF for file upload fallback.
+     * @param {string|null} targetResume        - Display name of a resume already uploaded to the platform.
+     * @param {number} [attemptNum=1]           - Current attempt number (for logging).
+     * @returns {Promise<'submitted'|'failed'>} - Result of the application attempt.
+     */
     async attemptApply(jobInfo, presetAnswers, resumePath, targetResume, attemptNum = 1) {
         console.log(`[${this.agentName}] [Attempt ${attemptNum}] Opening Apply Form for: ${jobInfo.title}`);
 
@@ -289,11 +338,11 @@ class BaseAgent {
 
         console.log(`[${this.agentName}] Modal opened. Filling form...`);
         let applicationSubmitted = false;
-        let maxSteps = 20;
+        let maxSteps = MAX_WIZARD_STEPS;
 
         while (maxSteps > 0 && !applicationSubmitted) {
             maxSteps--;
-            await new Promise(r => setTimeout(r, 1500));
+            await sleep(STEP_DELAY_MS);
 
             await this.handleResumeStep(resumePath, targetResume);
             await this.fillFormFields(presetAnswers);
@@ -321,11 +370,11 @@ class BaseAgent {
                         modal.scrollTo({ top: modal.scrollHeight, behavior: 'smooth' });
                     }
                 });
-                await new Promise(r => setTimeout(r, 1500));
+                await sleep(CLICK_DELAY_MS);
                 
                 console.log(`[${this.agentName}] Submitting application...`);
                 await btnToClick.click();
-                await new Promise(r => setTimeout(r, 2500));
+                await sleep(SUBMIT_DELAY_MS);
                 applicationSubmitted = true;
                 clicked = true;
 
@@ -337,7 +386,7 @@ class BaseAgent {
                 console.log(`[${this.agentName}] Clicking "Review"...`);
                 await btnToClick.click();
                 clicked = true;
-                await new Promise(r => setTimeout(r, 1500));
+                await sleep(CLICK_DELAY_MS);
 
                 const reviewErrors = await this.page.$$(this.selectors.errorFeedback);
                 if (reviewErrors.length > 0) {
@@ -350,7 +399,7 @@ class BaseAgent {
                 console.log(`[${this.agentName}] Clicking "${nextBtn.text}"...`);
                 await btnToClick.click();
                 clicked = true;
-                await new Promise(r => setTimeout(r, 1500));
+                await sleep(CLICK_DELAY_MS);
 
                 const errors = await this.page.$$(this.selectors.errorFeedback);
                 if (errors.length > 0) {
