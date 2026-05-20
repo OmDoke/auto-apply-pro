@@ -6,6 +6,12 @@ jest.mock('../utils/resumeQA', () => ({
 }));
 
 const { getAnswer, normalizeText, getBestFuzzyMatch } = require('../utils/questionAnswerer');
+const { getAIAnswer } = require('../utils/resumeQA');
+
+beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.LLM_FIRST = 'false';
+});
 
 const sampleUser = {
     experience: '3',
@@ -57,7 +63,7 @@ describe('getAnswer — rule-based', () => {
 
     test('returns notice period', async () => {
         const answer = await getAnswer('What is your notice period?', sampleUser);
-        expect(answer).toBe('15');
+        expect(answer).toBe('30');
     });
 
     test('returns GitHub URL for github question', async () => {
@@ -100,5 +106,29 @@ describe('getBestFuzzyMatch', () => {
     test('returns null for empty userData', () => {
         const result = getBestFuzzyMatch('anything', {});
         expect(result).toBeNull();
+    });
+});
+
+describe('getAnswer — precedence logic and options', () => {
+    test('Smart Hybrid routes dynamic notice period question to LLM first', async () => {
+        getAIAnswer.mockResolvedValueOnce('45');
+        const answer = await getAnswer('What is your notice period?', sampleUser);
+        expect(getAIAnswer).toHaveBeenCalledWith('What is your notice period?', {}, sampleUser);
+        expect(answer).toBe('45');
+    });
+
+    test('Smart Hybrid routes gender question to static rules first', async () => {
+        getAIAnswer.mockResolvedValueOnce('Female');
+        const answer = await getAnswer('What is your gender?', sampleUser);
+        expect(answer).toBe('Male');
+        expect(getAIAnswer).not.toHaveBeenCalled();
+    });
+
+    test('LLM_FIRST=true routes gender question to LLM first', async () => {
+        process.env.LLM_FIRST = 'true';
+        getAIAnswer.mockResolvedValueOnce('Female');
+        const answer = await getAnswer('What is your gender?', sampleUser);
+        expect(answer).toBe('Female');
+        expect(getAIAnswer).toHaveBeenCalled();
     });
 });
