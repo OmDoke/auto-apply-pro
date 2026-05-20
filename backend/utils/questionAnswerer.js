@@ -129,9 +129,13 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
             const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const pattern = new RegExp(`\\b${escaped}\\b`);
             if (pattern.test(normalizedQ)) {
-                const skillKey = Object.keys(data).find(k =>
-                    normalizeText(k).includes(skill)
-                );
+                const skillKey = Object.keys(data).find(k => {
+                    const normK = normalizeText(k);
+                    if (skill.length <= 2) {
+                        return normK === skill || new RegExp(`\\b${skill}\\b`).test(normK);
+                    }
+                    return normK.includes(skill);
+                });
                 if (skillKey !== undefined && data[skillKey] !== undefined) {
                     return String(data[skillKey]);
                 }

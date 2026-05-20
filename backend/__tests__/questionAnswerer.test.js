@@ -90,6 +90,12 @@ describe('getAnswer — rule-based', () => {
         const answer = await getAnswer('What is your gender?', sampleUser);
         expect(answer).toBe('Male');
     });
+
+    test('does not match c experience to contact phone number', async () => {
+        const answer = await getAnswer('How many years of experience do you have in C#?', sampleUser);
+        // Should fall back to general experience (3) rather than matching 'contact' (+91-7745042879)
+        expect(answer).toBe('3');
+    });
 });
 
 describe('getBestFuzzyMatch', () => {
