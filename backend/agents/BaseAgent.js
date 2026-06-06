@@ -77,9 +77,11 @@ class BaseAgent {
 
     async initializeBrowser() {
         console.log(`[${this.agentName}] Initializing browser...`);
+        const chromePath = process.env.CHROME_PATH
+            || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
         this.browser = await puppeteer.launch({
             headless: false,
-            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            executablePath: chromePath,
             userDataDir: this.userDataDir,
             args: [
                 '--no-sandbox',

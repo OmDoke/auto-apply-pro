@@ -4,16 +4,20 @@ const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const { getAnswer } = require('../utils/questionAnswerer');
 
-// Load answers.json from backend/data
+// answers.json is loaded fresh each run — see loadAnswers() helper
 const answersPath = path.join(__dirname, '..', 'data', 'answers.json');
-let presetAnswers = {};
-if (fs.existsSync(answersPath)) {
+
+// Load answers fresh from disk (called at the start of each run)
+const loadAnswers = () => {
     try {
-        presetAnswers = JSON.parse(fs.readFileSync(answersPath, 'utf8'));
-    } catch(err) {
+        if (fs.existsSync(answersPath)) {
+            return JSON.parse(fs.readFileSync(answersPath, 'utf8'));
+        }
+    } catch (err) {
         console.error('Could not parse answers.json:', err);
     }
-}
+    return {};
+};
 
 // Resume path from backend/data
 const resumePath = path.join(__dirname, '..', 'data', 'resume.pdf');
@@ -785,11 +789,77 @@ const screenshotOnFailure = async (page, label) => {
         console.log(`  📸 Screenshot saved: ${screenshotPath}`);
     } catch (_) { /* non-fatal */ }
 };
+// ---------------------------------------------------------------------------
+// Helper: targeted recovery from LinkedIn form validation errors.
+// Reads error text next to inputs, fixes numeric/type-mismatch errors.
+// ---------------------------------------------------------------------------
+const recoverLinkedInFormErrors = async (page, answers) => {
+    try {
+        const errorFields = await page.evaluate(() => {
+            const errorEls = Array.from(document.querySelectorAll('.artdeco-inline-feedback--error'))
+                .filter(el => el.offsetParent !== null);
 
-// ---------------------------------------------------------------------------
-// Core: attempt to apply to a single job.
-// Returns: 'submitted', 'skipped', or 'failed'
-// ---------------------------------------------------------------------------
+            return errorEls.map(errEl => {
+                let container = errEl.parentElement;
+                for (let i = 0; i < 8; i++) {
+                    if (!container) break;
+                    const inp = container.querySelector('input[type="text"], input[type="number"], input[type="tel"], textarea');
+                    if (inp) {
+                        const label = container.querySelector('label, legend, [class*="label"]');
+                        return {
+                            errorText: errEl.innerText.trim(),
+                            labelText: label ? label.innerText.trim() : (inp.placeholder || inp.name || ''),
+                            aagroup: container.getAttribute('data-aagroup') || null,
+                            inputType: inp.type || 'text',
+                            currentValue: inp.value || ''
+                        };
+                    }
+                    container = container.parentElement;
+                }
+                return null;
+            }).filter(Boolean);
+        });
+
+        if (errorFields.length === 0) return;
+        console.log(`  🔧 LinkedIn error recovery: ${errorFields.length} field(s) to fix`);
+
+        for (const field of errorFields) {
+            const isNumericError = /decimal|number|greater than|larger than|digits only|numeric|enter a value/i.test(field.errorText);
+            console.log(`    Error: "${field.labelText}" → "${field.errorText}"`);
+
+            let fixValue = null;
+            if (isNumericError) {
+                const labelLower = field.labelText.toLowerCase();
+                if (labelLower.includes('salary') || labelLower.includes('ctc') || labelLower.includes('lpa')) {
+                    fixValue = String(answers['current salary'] || answers['expected salary'] || '2');
+                } else {
+                    fixValue = String(answers['experience'] || '1');
+                }
+            }
+
+            if (!fixValue || !field.aagroup) continue;
+
+            await page.evaluate(({ aagroup, value }) => {
+                const group = document.querySelector(`[data-aagroup="${aagroup}"]`);
+                if (!group) return;
+                const inp = group.querySelector('input[type="text"], input[type="number"], input[type="tel"], textarea');
+                if (!inp) return;
+                const nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                if (nativeSet) nativeSet.call(inp, value);
+                else inp.value = value;
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+            }, { aagroup: field.aagroup, value: fixValue });
+
+            console.log(`    ✔ Fixed "${field.labelText}" → "${fixValue}"`);
+        }
+        await new Promise(r => setTimeout(r, 400));
+    } catch (e) {
+        console.log('  recoverLinkedInFormErrors error:', e.message);
+    }
+};
+
+
 const attemptApply = async (page, jobInfo, attemptNum) => {
     console.log(`  [Attempt ${attemptNum}/2] Opening Easy Apply for: ${jobInfo.title}`);
 
@@ -892,7 +962,9 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
             if (reviewErrors.length > 0) {
                 const msgs = await Promise.all(reviewErrors.map(e => page.evaluate(el => el.innerText.trim(), e)));
                 console.log(`  ❌ Validation errors after Review: ${msgs.join(' | ')}`);
-                // One re-fill attempt on errored fields before giving up
+                // Step 1: Targeted numeric/type-mismatch recovery
+                await recoverLinkedInFormErrors(page, presetAnswers);
+                // Step 2: Full re-fill pass for any remaining blanks
                 await fillFormFields(page, presetAnswers);
                 await new Promise(r => setTimeout(r, 800));
                 const stillErrors = await page.$$('.artdeco-inline-feedback--error');
@@ -915,7 +987,9 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
             if (errors.length > 0) {
                 const msgs = await Promise.all(errors.map(e => page.evaluate(el => el.innerText.trim(), e)));
                 console.log(`  ❌ Validation errors on step: ${msgs.join(' | ')}`);
-                // One re-fill attempt before giving up
+                // Step 1: Targeted numeric/type-mismatch recovery
+                await recoverLinkedInFormErrors(page, presetAnswers);
+                // Step 2: Full re-fill pass for any remaining blanks
                 await fillFormFields(page, presetAnswers);
                 await new Promise(r => setTimeout(r, 800));
                 const stillErrors = await page.$$('.artdeco-inline-feedback--error');
@@ -943,13 +1017,41 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
 const run = async () => {
     console.log('LinkedIn Agent Initializing...');
 
+    // Load answers fresh from disk at start of each run (picks up edits without restart)
+    const presetAnswers = loadAnswers();
+    console.log(`Loaded ${Object.keys(presetAnswers).length} answer(s) from answers.json`);
+
     const userDataDir = path.join(__dirname, '..', 'data', 'puppeteer', 'linkedin_profile');
+    const chromePath = process.env.CHROME_PATH
+        || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 
     const browser = await puppeteer.launch({
         headless: false,
+        executablePath: chromePath,
         userDataDir: userDataDir,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1280,800']
     });
+
+    // ---------------------------------------------------------------------------
+    // safeEvaluate — retries once on stale/detached element errors.
+    // Prevents the agent from crashing when a job card gets detached mid-interaction.
+    // ---------------------------------------------------------------------------
+    const safeEvaluate = async (page, fn, ...args) => {
+        try {
+            return await page.evaluate(fn, ...args);
+        } catch (err) {
+            if (err.message && (err.message.includes('detached') || err.message.includes('destroyed') || err.message.includes('Node is detached'))) {
+                console.log('  [safeEvaluate] Stale element — retrying in 1s...');
+                await new Promise(r => setTimeout(r, 1000));
+                try {
+                    return await page.evaluate(fn, ...args);
+                } catch (_) {
+                    return null; // second failure — give up gracefully
+                }
+            }
+            throw err;
+        }
+    };
 
     const failedJobs = [];
     const skippedJobs = [];

@@ -175,6 +175,92 @@ class IndeedAgent extends BaseAgent {
     /**
      * Fills all visible form fields on the smartapply.indeed.com page.
      */
+    // ─── Error Recovery ──────────────────────────────────────────────────────────
+
+    /**
+     * Called when form errors are detected after clicking Continue.
+     * Reads the error message text, finds the adjacent input, and force-fills
+     * it with a numeric fallback (handles "Enter a decimal number larger than 0.0" errors).
+     */
+    async recoverFromFormErrors(applyPage, presetAnswers) {
+        try {
+            const errorFields = await applyPage.evaluate(() => {
+                const errorEls = Array.from(document.querySelectorAll(
+                    '.ia-FormError, [data-testid="error-message"], [class*="ErrorMessage"], [class*="error-message"]'
+                )).filter(el => el.offsetParent !== null);
+
+                return errorEls.map(errEl => {
+                    // Walk up to find the containing field group
+                    let container = errEl.parentElement;
+                    for (let i = 0; i < 6; i++) {
+                        if (!container) break;
+                        const inp = container.querySelector('input, textarea, select');
+                        if (inp) {
+                            // Get label for this field
+                            const label = container.querySelector('label, legend, [class*="label"]');
+                            return {
+                                errorText: errEl.innerText.trim(),
+                                labelText: label ? label.innerText.trim() : (inp.name || inp.placeholder || ''),
+                                aaidx: inp.getAttribute('data-aaidx') || null,
+                                inputType: inp.type || 'text',
+                                currentValue: inp.value || ''
+                            };
+                        }
+                        container = container.parentElement;
+                    }
+                    return null;
+                }).filter(Boolean);
+            });
+
+            if (errorFields.length === 0) return;
+
+            console.log(`[${this.agentName}] 🔧 Recovering from ${errorFields.length} error(s)...`);
+
+            for (const field of errorFields) {
+                const isNumericError = /decimal|number|greater than|larger than|digits only|numeric/i.test(field.errorText);
+                const isRequiredError = /required|cannot be blank|must be/i.test(field.errorText);
+
+                console.log(`[${this.agentName}]   Error field: "${field.labelText}" → "${field.errorText}"`);
+
+                let fixValue = null;
+                if (isNumericError) {
+                    // Numeric field: try to find a years-of-experience answer, fallback to '1'
+                    const labelLower = field.labelText.toLowerCase();
+                    if (labelLower.includes('salary') || labelLower.includes('ctc') || labelLower.includes('lpa')) {
+                        fixValue = String(presetAnswers['current salary'] || presetAnswers['expected salary'] || '2');
+                    } else {
+                        fixValue = String(presetAnswers['experience'] || '1');
+                    }
+                } else if (isRequiredError && !field.currentValue) {
+                    // Required field that's blank — try a generic lookup
+                    const { getAnswer } = require('../utils/questionAnswerer');
+                    fixValue = await getAnswer(field.labelText, presetAnswers, { type: field.inputType });
+                    if (!fixValue) fixValue = '1';
+                }
+
+                if (!fixValue) continue;
+
+                if (field.aaidx) {
+                    await applyPage.evaluate(({ aaidx, value }) => {
+                        const el = document.querySelector(`[data-aaidx="${aaidx}"]`);
+                        if (!el) return;
+                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')
+                            || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+                        if (setter) setter.set.call(el, value);
+                        else el.value = value;
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }, { aaidx: field.aaidx, value: fixValue });
+                    console.log(`[${this.agentName}]   ✔ Fixed "${field.labelText}" → "${fixValue}"`);
+                }
+            }
+
+            await new Promise(r => setTimeout(r, 500));
+        } catch (e) {
+            console.log(`[${this.agentName}] Error recovery failed: ${e.message}`);
+        }
+    }
+
     async fillSmartApplyForm(applyPage, presetAnswers) {
         try {
             const { getAnswer } = require('../utils/questionAnswerer');
@@ -479,11 +565,14 @@ class IndeedAgent extends BaseAgent {
 
                     // Check for form errors after clicking
                     const hasErrors = await applyPage.evaluate(() => {
-                        const errs = document.querySelectorAll('.ia-FormError, [data-testid="error-message"], [class*="error"]');
+                        const errs = document.querySelectorAll('.ia-FormError, [data-testid="error-message"], [class*="ErrorMessage"]');
                         return errs.length > 0;
                     }).catch(() => false);
                     if (hasErrors) {
-                        console.log(`[${this.agentName}] ⚠️  Form errors detected, attempting to fix...`);
+                        console.log(`[${this.agentName}] ⚠️  Form errors detected, running targeted recovery...`);
+                        // First: targeted recovery (numeric/type-mismatch errors)
+                        await this.recoverFromFormErrors(applyPage, presetAnswers);
+                        // Then: full re-fill pass to catch any remaining blanks
                         await this.fillSmartApplyForm(applyPage, presetAnswers);
                     }
 
@@ -698,14 +787,19 @@ class IndeedAgent extends BaseAgent {
             const location = process.env.FRONTEND_LOCATION || '';
             // No apply limit — runs until Ctrl+C (SIGINT/SIGTERM handled by BaseAgent)
 
-            this.presetAnswers = {};
             this.resumePath = path.join(__dirname, '..', 'data', 'resume.pdf');
             this.targetResume = process.env.RESUME_NAME || '';
 
+            // Hot-load answers.json fresh each run — picks up edits without restart
             const answersPath = path.join(__dirname, '..', 'data', 'answers.json');
+            this.presetAnswers = {};
             if (fs.existsSync(answersPath)) {
-                this.presetAnswers = JSON.parse(fs.readFileSync(answersPath, 'utf8'));
-                console.log(`[${this.agentName}] Loaded answers.json`);
+                try {
+                    this.presetAnswers = JSON.parse(fs.readFileSync(answersPath, 'utf8'));
+                    console.log(`[${this.agentName}] Loaded ${Object.keys(this.presetAnswers).length} answer(s) from answers.json`);
+                } catch (e) {
+                    console.error(`[${this.agentName}] Could not parse answers.json:`, e.message);
+                }
             }
 
             await this.login();
