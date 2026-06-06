@@ -21,7 +21,8 @@ const { PromptTemplate } = require('@langchain/core/prompts');
 // Cache the parsed resume text to avoid re-reading the PDF on every call
 let cachedResumeText = null;
 
-// Singleton LLM client — instantiated once, reused across all getAIAnswer calllet _llmClient = null;
+// Singleton LLM client — instantiated once, reused across all getAIAnswer calls
+let _llmClient = null;
 let _llmModel = null;
 const getLLMClient = () => {
     const modelName = process.env.GROQ_MODEL || 'deepseek-r1-distill-llama-70b';

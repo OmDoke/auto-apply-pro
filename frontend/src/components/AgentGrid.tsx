@@ -51,7 +51,7 @@ export function AgentGrid({
           <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Agents</h2>
         </div>
         <span className="text-xs text-slate-600 font-medium">
-          {agents.filter(a => !a.stub).length} active · {agents.filter(a => a.stub).length} coming soon
+          {agents.length} agents ready
         </span>
       </div>
 

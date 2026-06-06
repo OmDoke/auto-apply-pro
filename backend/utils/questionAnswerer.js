@@ -72,6 +72,15 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
     // Merge provided userData with loaded profile (provided takes precedence)
     const data = { ...loadedUserData, ...userData };
 
+    // ---------- Names ----------
+    if (normalizedQ.includes('name') && 
+        !/\b(company|employer|institution|university|school|college|degree)\b/.test(normalizedQ)) {
+        if (normalizedQ.includes('first')) return String(data['first name'] ?? 'Onkar');
+        if (normalizedQ.includes('last') || normalizedQ.includes('surname')) return String(data['last name'] ?? 'Doke');
+        if (normalizedQ.includes('preferred')) return String(data['preferred name'] ?? data['first name'] ?? 'Onkar');
+        return String(data['full name'] ?? data['name'] ?? 'Onkar Doke');
+    }
+
     // ---------- Notice period / Can you start immediately ----------
     if (normalizedQ.includes('notice') || normalizedQ.includes('joining') || normalizedQ.includes('how soon can you join') ||
         normalizedQ.includes('start immediately') || normalizedQ.includes('immediate') || normalizedQ.includes('can you start')) {
@@ -84,6 +93,9 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
                     // "Can you start immediately?" → controlled by 'immediate start' in user_profile.json (default: 'Yes')
                     if (normalizedQ.includes('immediately') || normalizedQ.includes('immediate') || normalizedQ.includes('instant')) {
                         return String(data['immediate start'] ?? 'Yes');
+                    }
+                    if (normalizedQ.includes('serving')) {
+                        return String(data['serving notice'] ?? data['currently serving notice'] ?? 'No');
                     }
                     // Generic yes/no for notice period → Yes (we are available)
                     return 'Yes';
@@ -101,7 +113,17 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
             }
             return '15 days';
         }
-        return data['notice period'] ?? '15';
+        let noticeVal = data['notice period'] ?? '15';
+        if (context && context.source === 'linkedin' && normalizedQ.includes('weeks')) {
+            const num = parseInt(noticeVal);
+            if (!isNaN(num)) {
+                if (noticeVal.toLowerCase().includes('day') || num > 5) {
+                    return String(Math.round(num / 7));
+                }
+                return String(num);
+            }
+        }
+        return noticeVal;
     }
 
     // ---------- Salary / CTC / compensation — current vs expected ----------
@@ -111,24 +133,77 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('compensation') ||
         normalizedQ.includes('remuneration') ||
         normalizedQ.includes('package') ||
-        normalizedQ.includes('lpa')
+        normalizedQ.includes('lpa') ||
+        normalizedQ.includes('stipend')
     ) {
+        if (context && context.options && context.options.length > 0) {
+            const lowerOpts = context.options.map(o => o.toLowerCase());
+            if (lowerOpts.includes('yes') && lowerOpts.includes('no')) {
+                return 'Yes';
+            }
+        }
         const salaryType = detectSalaryType(normalizedQ);
-        if (salaryType === 'current') return String(data['current salary'] ?? '2');
-        if (salaryType === 'expected') return String(data['expected salary'] ?? '6');
-        // If question has ONLY "expected" wording in title
-        if (normalizedQ.includes('expected')) return String(data['expected salary'] ?? '6');
-        if (normalizedQ.includes('current')) return String(data['current salary'] ?? '2');
-        // Default: treat as current CTC
-        return String(data['current salary'] ?? '2');
+        let ansVal = '2';
+        if (salaryType === 'current') ansVal = String(data['current salary'] ?? '2');
+        else if (salaryType === 'expected') ansVal = String(data['expected salary'] ?? '6');
+        else if (normalizedQ.includes('expected')) ansVal = String(data['expected salary'] ?? '6');
+        else if (normalizedQ.includes('current')) ansVal = String(data['current salary'] ?? '2');
+        else ansVal = String(data['current salary'] ?? '2');
+
+        // Scale to raw INR if the question explicitly asks "in INR", "in Rs", or "rupee"
+        if (normalizedQ.includes('inr') || normalizedQ.includes('in rs') || normalizedQ.includes('rupee')) {
+            const num = parseFloat(ansVal);
+            if (!isNaN(num) && num < 100) {
+                ansVal = String(Math.round(num * 100000));
+            }
+        }
+        return ansVal;
+    }
+
+    // ---------- Relevant experience job / Enter a job that shows relevant experience ----------
+    if (
+        normalizedQ.includes('job that shows') ||
+        (normalizedQ.includes('job') && normalizedQ.includes('relevant experience'))
+    ) {
+        return String(data['relevant experience job'] ?? data['job that shows relevant experience'] ?? 'ht labs and role intern');
+    }
+
+    // ---------- Company / Employer ----------
+    if (
+        normalizedQ === 'company' ||
+        normalizedQ === 'employer' ||
+        normalizedQ.includes('company name') ||
+        normalizedQ.includes('name of company') ||
+        normalizedQ.includes('current company') ||
+        normalizedQ.includes('previous company') ||
+        normalizedQ.includes('most recent company')
+    ) {
+        return String(data['company'] ?? data['employer'] ?? 'ht labs');
+    }
+
+    // ---------- Job Title / Role ----------
+    if (
+        normalizedQ === 'job title' ||
+        normalizedQ === 'title' ||
+        normalizedQ === 'role' ||
+        normalizedQ.includes('job title') ||
+        normalizedQ.includes('current job title') ||
+        normalizedQ.includes('most recent job title')
+    ) {
+        if (!context.options || !context.options.some(o => /mr|ms|dr/i.test(o))) {
+            return String(data['job title'] ?? data['role'] ?? 'intern');
+        }
     }
 
     // ---------- Experience / years of experience ----------
-    if (normalizedQ.includes('experience') || normalizedQ.includes('years')) {
+    if (normalizedQ.includes('experience') || normalizedQ.includes('years') || normalizedQ.includes('months')) {
+        let answerVal = null;
+        let foundSkill = false;
         for (const skill of SKILL_TOKENS) {
             const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const pattern = new RegExp(`\\b${escaped}\\b`);
             if (pattern.test(normalizedQ)) {
+                foundSkill = true;
                 const skillKey = Object.keys(data).find(k => {
                     const normK = normalizeText(k);
                     if (skill.length <= 2) {
@@ -137,14 +212,38 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
                     return normK.includes(skill);
                 });
                 if (skillKey !== undefined && data[skillKey] !== undefined) {
-                    return String(data[skillKey]);
+                    answerVal = String(data[skillKey]);
+                } else {
+                    const generalExp = data['experience'] ?? data['years'] ?? null;
+                    answerVal = generalExp !== null ? String(generalExp) : '1';
                 }
-                const generalExp = data['experience'] ?? data['years'] ?? null;
-                return generalExp !== null ? String(generalExp) : '1';
+                break;
             }
         }
-        const exp = data['experience'] ?? data['years'] ?? '1';
-        if (exp !== null) return String(exp);
+        if (!foundSkill) {
+            if (normalizedQ.includes('frontend') || normalizedQ.includes('front end') || normalizedQ.includes('front-end')) {
+                answerVal = String(data['frontend'] ?? data['react'] ?? data['experience'] ?? '1');
+            } else if (normalizedQ.includes('backend') || normalizedQ.includes('back end') || normalizedQ.includes('back-end')) {
+                answerVal = String(data['backend'] ?? data['node'] ?? data['experience'] ?? '1');
+            } else if (normalizedQ.includes('full stack') || normalizedQ.includes('fullstack')) {
+                answerVal = String(data['full stack'] ?? data['experience'] ?? '1');
+            } else {
+                const exp = data['experience'] ?? data['years'] ?? '1';
+                answerVal = String(exp);
+            }
+        }
+
+        // If the question explicitly asks for months, convert years to months
+        if (answerVal !== null && normalizedQ.includes('months')) {
+            if (context && context.source === 'linkedin' && (normalizedQ.includes('additional') || normalizedQ.includes('remaining') || normalizedQ.includes('extra') || normalizedQ.includes('excess'))) {
+                return '0';
+            }
+            const parsedVal = parseFloat(answerVal);
+            if (!isNaN(parsedVal) && parsedVal < 5) {
+                return String(Math.round(parsedVal * 12));
+            }
+        }
+        return answerVal;
     }
 
     // ---------- Authorization / work permit ----------
@@ -213,6 +312,19 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
 
     // ---------- Race / ethnicity ----------
     if (normalizedQ.includes('race') || normalizedQ.includes('ethnic')) {
+        // If options are present (full description radio buttons), find best match
+        if (context.options && context.options.length > 0) {
+            // Prefer "I don't wish to answer" / "Decline" option
+            const declineOpt = context.options.find(o =>
+                o.toLowerCase().includes("don't wish") ||
+                o.toLowerCase().includes('decline') ||
+                o.toLowerCase().includes('prefer not to')
+            );
+            if (declineOpt) return declineOpt;
+            // Fallback: Asian option (closest to Indian)
+            const asianOpt = context.options.find(o => o.toLowerCase().includes('asian'));
+            if (asianOpt) return asianOpt;
+        }
         return String(data['race'] ?? 'Decline to self-identify');
     }
 
@@ -377,10 +489,15 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         return 'Yes';
     }
 
+    // ---------- References ----------
+    if (normalizedQ.includes('reference')) {
+        return String(data['references'] ?? data['employment references'] ?? 'Available upon request');
+    }
+
     // ---------- Family / close friend at company ----------
     if (
-        (normalizedQ.includes('family') || normalizedQ.includes('close friend')) &&
-        (normalizedQ.includes('employed') || normalizedQ.includes('relationship') || normalizedQ.includes('work'))
+        (normalizedQ.includes('family') || normalizedQ.includes('close friend') || (context && context.source === 'linkedin' && normalizedQ.includes('relative'))) &&
+        (normalizedQ.includes('employed') || normalizedQ.includes('relationship') || normalizedQ.includes('work') || normalizedQ.includes('organization') || normalizedQ.includes('company'))
     ) {
         return String(data['family at company'] ?? 'No');
     }
@@ -503,8 +620,8 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
 
     // ---------- Previously applied / worked at this company ----------
     if (
-        (normalizedQ.includes('previously') || normalizedQ.includes('before') || normalizedQ.includes('before this')) &&
-        (normalizedQ.includes('applied') || normalizedQ.includes('worked') || normalizedQ.includes('employed'))
+        (normalizedQ.includes('previously') || normalizedQ.includes('before') || normalizedQ.includes('before this') || (context && context.source === 'linkedin' && (normalizedQ.includes('ever been') || normalizedQ.includes('former employee')))) &&
+        (normalizedQ.includes('applied') || normalizedQ.includes('worked') || normalizedQ.includes('employed') || normalizedQ.includes('employment'))
     ) {
         return String(data['previously applied'] ?? 'No');
     }
@@ -523,14 +640,18 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         return 'Yes';
     }
     
+    // ---------- AI Products / Products built with AI tools ----------
+    if (normalizedQ.includes('product') && normalizedQ.includes('ai')) {
+        return String(data['products built with ai tools'] ?? data['ai products'] ?? '5');
+    }
+
     if (normalizedQ.includes('programming language') && normalizedQ.includes('how many')) {
         return String(data['programming languages'] ?? 'JavaScript, Java, SQL');
     }
 
     // ---------- Referral / referred by ----------
     if (
-        normalizedQ.includes('referred') ||
-        normalizedQ.includes('referral') ||
+        /\b(referred|referral)\b/.test(normalizedQ) ||
         (normalizedQ.includes('how did you hear') && normalizedQ.includes('this job')) ||
         normalizedQ.includes('source of application')
     ) {
@@ -712,6 +833,372 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         return String(data['email'] ?? '');
     }
 
+    // ---------- Work arrangement / work model / hybrid ----------
+    if (
+        normalizedQ.includes('work arrangement') ||
+        normalizedQ.includes('work model') ||
+        normalizedQ.includes('in-office') ||
+        normalizedQ.includes('hybrid work') ||
+        normalizedQ.includes('mode of work') ||
+        normalizedQ.includes('work mode')
+    ) {
+        if (context.options && context.options.length > 0) {
+            const opts = context.options.map(o => o.toLowerCase());
+            if (opts.some(o => o.includes('hybrid')))
+                return context.options.find(o => o.toLowerCase().includes('hybrid'));
+            if (opts.some(o => o.includes('remote')))
+                return context.options.find(o => o.toLowerCase().includes('remote'));
+        }
+        return String(data['work arrangement'] ?? 'Hybrid');
+    }
+
+    // ---------- Age verification / 18+ ----------
+    if (
+        (normalizedQ.includes('18') && (normalizedQ.includes('age') || normalizedQ.includes('year'))) ||
+        normalizedQ.includes('age eligible') ||
+        (normalizedQ.includes('you are') && normalizedQ.includes('years old'))
+    ) {
+        return 'Yes';
+    }
+
+    // ---------- CGPA / GPA / percentage / marks ----------
+    if (
+        normalizedQ.includes('percentage') ||
+        normalizedQ.includes('aggregate percentage')
+    ) {
+        return String(data['percentage'] ?? '75');
+    }
+    if (
+        normalizedQ.includes('cgpa') ||
+        normalizedQ.includes('gpa') ||
+        normalizedQ.includes('aggregate') ||
+        (normalizedQ.includes('score') || normalizedQ.includes('achiev') || normalizedQ.includes('marks'))
+    ) {
+        return String(data['cgpa'] ?? data['gpa'] ?? '7.5');
+    }
+
+    // ---------- Field of study / major / area of study ----------
+    if (
+        normalizedQ.includes('field of study') ||
+        normalizedQ.includes('area of study') ||
+        (normalizedQ.includes('major') && (normalizedQ.includes('your') || normalizedQ.includes('what'))) ||
+        (normalizedQ.includes('stream') && normalizedQ.includes('studied'))
+    ) {
+        return String(data['field of study'] ?? 'Computer Engineering');
+    }
+
+    // ---------- University / College / Institution / School ----------
+    if (
+        normalizedQ.includes('university') ||
+        normalizedQ.includes('college') ||
+        normalizedQ.includes('institution') ||
+        (normalizedQ.includes('school') && !normalizedQ.includes('high school') && !normalizedQ.includes('secondary'))
+    ) {
+        return String(data['university'] ?? 'Savitribai Phule Pune University');
+    }
+
+    // ---------- Current location / current city ----------
+    if (
+        (normalizedQ.includes('current') && normalizedQ.includes('location')) ||
+        (normalizedQ.includes('current') && normalizedQ.includes('city')) ||
+        (normalizedQ.includes('where') && normalizedQ.includes('currently') && normalizedQ.includes('live'))
+    ) {
+        return String(data['city'] ?? 'Pune');
+    }
+
+    // ---------- NDA / Non-compete / Confidentiality ----------
+    if (
+        normalizedQ.includes('nda') ||
+        normalizedQ.includes('non-compete') ||
+        normalizedQ.includes('non compete') ||
+        normalizedQ.includes('confidentiality') ||
+        normalizedQ.includes('non disclosure')
+    ) {
+        return String(data['nda'] ?? 'Yes');
+    }
+
+    // ---------- Hours per week ----------
+    if (
+        (normalizedQ.includes('hours') && normalizedQ.includes('week')) ||
+        normalizedQ.includes('hours per week') ||
+        normalizedQ.includes('weekly hours')
+    ) {
+        return String(data['hours per week'] ?? '40');
+    }
+
+    // ---------- Professional association / membership ----------
+    if (
+        normalizedQ.includes('association') ||
+        normalizedQ.includes('membership') ||
+        normalizedQ.includes('professional organization') ||
+        normalizedQ.includes('member of any')
+    ) {
+        return String(data['association'] ?? 'No');
+    }
+
+    // ---------- Project / portfolio description ----------
+    if (
+        (normalizedQ.includes('project') && (normalizedQ.includes('describe') || normalizedQ.includes('notable') || normalizedQ.includes('best') || normalizedQ.includes('recent'))) ||
+        normalizedQ.includes('portfolio project')
+    ) {
+        return String(data['project description'] ??
+            'Built a full-stack job application tracker using React.js, Node.js, and MySQL with JWT authentication, real-time updates via WebSocket, and automated email notifications.');
+    }
+
+    // ---------- Achievement / accomplishment ----------
+    if (
+        normalizedQ.includes('achievement') ||
+        normalizedQ.includes('accomplishment') ||
+        normalizedQ.includes('proud of') ||
+        (normalizedQ.includes('greatest') && normalizedQ.includes('achievement'))
+    ) {
+        return String(data['achievement'] ??
+            'Reduced API response time by 40% through query optimization and Redis caching in a production Node.js application.');
+    }
+
+    // ---------- Strength / value add ----------
+    if (
+        (normalizedQ.includes('strength') && !normalizedQ.includes('password')) ||
+        normalizedQ.includes('your best quality') ||
+        (normalizedQ.includes('value') && normalizedQ.includes('bring'))
+    ) {
+        return String(data['strength'] ??
+            'Strong problem-solving skills and ability to quickly learn new technologies. I thrive in collaborative environments and consistently deliver clean, maintainable code.');
+    }
+
+    // ---------- Weakness ----------
+    if (normalizedQ.includes('weakness') || normalizedQ.includes('area of improvement')) {
+        return String(data['weakness'] ??
+            'I sometimes over-engineer solutions, but I have learned to balance thoroughness with delivery speed by setting timebox limits for myself.');
+    }
+
+    // ---------- Currently interviewing / other offers ----------
+    if (
+        (normalizedQ.includes('currently') && normalizedQ.includes('interview')) ||
+        normalizedQ.includes('interview process') ||
+        normalizedQ.includes('other interviews')
+    ) {
+        return String(data['interviewing'] ?? 'No');
+    }
+
+    // ---------- Open to contract / freelance ----------
+    if (
+        (normalizedQ.includes('contract') || normalizedQ.includes('freelance')) &&
+        (normalizedQ.includes('open') || normalizedQ.includes('willing') || normalizedQ.includes('comfortable'))
+    ) {
+        return String(data['contract'] ?? 'Yes');
+    }
+
+    // ---------- Immediate joining / available immediately ----------
+    if (
+        normalizedQ.includes('immediate joining') ||
+        normalizedQ.includes('join immediately') ||
+        (normalizedQ.includes('available') && normalizedQ.includes('immediately'))
+    ) {
+        if (context.options && context.options.length > 0) {
+            const opts = context.options.map(o => o.toLowerCase());
+            if (opts.includes('yes') && opts.includes('no')) return String(data['immediate joining'] ?? 'No');
+        }
+        return String(data['immediate joining'] ?? 'No');
+    }
+
+    // ---------- How did you hear / source of application ----------
+    if (
+        normalizedQ.includes('how did you hear') ||
+        normalizedQ.includes('where did you find') ||
+        normalizedQ.includes('how did you learn about') ||
+        normalizedQ.includes('source of application') ||
+        (normalizedQ.includes('how') && normalizedQ.includes('find') && normalizedQ.includes('job'))
+    ) {
+        return String(data['referral'] ?? 'LinkedIn');
+    }
+
+    // ---------- Expected joining date ----------
+    if (
+        normalizedQ.includes('expected joining') ||
+        normalizedQ.includes('joining date') ||
+        (normalizedQ.includes('when') && normalizedQ.includes('join') && !normalizedQ.includes('immediately'))
+    ) {
+        return String(data['start date'] ?? '15 days');
+    }
+
+    // ---------- Reason for leaving / leaving current job / reason for change ----------
+    if (
+        normalizedQ.includes('reason for leaving') ||
+        normalizedQ.includes('why are you looking') ||
+        normalizedQ.includes('why do you want to leave') ||
+        normalizedQ.includes('why leaving') ||
+        normalizedQ.includes('reason for change') ||
+        normalizedQ.includes('reason for switch')
+    ) {
+        return String(data['reason for change'] ?? data['reason for leaving'] ??
+            'Seeking better growth opportunities and a role that fully leverages my full-stack development skills in a dynamic team.');
+    }
+
+    // ---------- Last working day / last service date ----------
+    // Triggered when: "If yes, please mention your last working day" or similar
+    if (
+        normalizedQ.includes('last working day') ||
+        normalizedQ.includes('last service date') ||
+        normalizedQ.includes('last day of work') ||
+        normalizedQ.includes('end date') ||
+        (normalizedQ.includes('last') && normalizedQ.includes('day') && (normalizedQ.includes('mention') || normalizedQ.includes('work')))
+    ) {
+        return String(data['last working day'] ?? data['last service date'] ?? '15/06/2026');
+    }
+
+    // ---------- Founder's office / ambiguous environment comfort (scale of 1-10) ----------
+    if (
+        normalizedQ.includes('founder') ||
+        normalizedQ.includes('scale of 1') ||
+        normalizedQ.includes('scale of 110') ||
+        (normalizedQ.includes('scale') && normalizedQ.includes('comfort')) ||
+        (normalizedQ.includes('ambiguous') && normalizedQ.includes('environment')) ||
+        (normalizedQ.includes('comfort') && (normalizedQ.includes('working') || normalizedQ.includes('environment')))
+    ) {
+        return String(data['founder comfort scale'] ?? data['comfort scale'] ?? '8');
+    }
+
+    // ---------- Ethnic Identity (full description radio options) ----------
+    if (
+        normalizedQ.includes('ethnic identity') ||
+        normalizedQ.includes('ethnic background') ||
+        (normalizedQ.includes('ethnic') && (normalizedQ.includes('identify') || normalizedQ.includes('origin')))
+    ) {
+        // If presented as radio with full descriptions, pick "I don't wish to answer"
+        if (context.options && context.options.length > 0) {
+            const noWishOpt = context.options.find(o =>
+                o.toLowerCase().includes("don't wish") ||
+                o.toLowerCase().includes('decline') ||
+                o.toLowerCase().includes('prefer not')
+            );
+            if (noWishOpt) return noWishOpt;
+            // Fallback to Asian option if available (closest to Indian origin)
+            const asianOpt = context.options.find(o => o.toLowerCase().includes('asian'));
+            if (asianOpt) return asianOpt;
+        }
+        return String(data['race'] ?? 'Decline to self-identify');
+    }
+
+    // ---------- Gender identity ("Do you think of yourself as?") ----------
+    if (
+        (normalizedQ.includes('think of yourself') && normalizedQ.includes('as')) ||
+        normalizedQ.includes('identify as')
+    ) {
+        if (context.options && context.options.length > 0) {
+            const maleOpt = context.options.find(o => o.toLowerCase() === 'male' || o.toLowerCase().includes('man'));
+            if (maleOpt) return maleOpt;
+        }
+        return String(data['gender'] ?? 'Male');
+    }
+
+    // ---------- How soon can you start? (checkbox group) ----------
+    if (
+        (normalizedQ.includes('how soon') && normalizedQ.includes('start')) ||
+        (normalizedQ.includes('how soon') && normalizedQ.includes('can you'))
+    ) {
+        if (context.options && context.options.length > 0) {
+            const opts = context.options.map(o => o.toLowerCase());
+            // Prefer 15-day-ish options
+            for (const opt of opts) {
+                if (opt.includes('15') || opt.includes('two week') || opt.includes('2 week')) {
+                    return context.options[opts.indexOf(opt)];
+                }
+            }
+            // Prefer 30 days (1 month)
+            for (const opt of opts) {
+                if (opt.includes('30') || opt.includes('month') || opt.includes('less than')) {
+                    return context.options[opts.indexOf(opt)];
+                }
+            }
+            return context.options[0];
+        }
+        return '30 days';
+    }
+
+    // ---------- Why are you a good fit / Why should we hire you ----------
+    if (
+        normalizedQ.includes('good fit') ||
+        normalizedQ.includes('why do you think you are') ||
+        (normalizedQ.includes('fit') && normalizedQ.includes('role')) ||
+        (normalizedQ.includes('fit') && normalizedQ.includes('position'))
+    ) {
+        return String(data['why good fit'] ?? data['why us'] ??
+            'I am a Full Stack Developer with hands-on experience in React.js, Node.js, and MySQL. My CDAC certification and 1 year of industry experience make me a strong candidate for this role.');
+    }
+
+    // ---------- Tech stack / current tech stack ----------
+    if (
+        (normalizedQ.includes('tech') && normalizedQ.includes('stack')) ||
+        normalizedQ.includes('technology stack') ||
+        normalizedQ.includes('technologies you use') ||
+        normalizedQ.includes('tools and technologies')
+    ) {
+        return String(data['tech stack'] ?? data['current tech stack'] ??
+            'React.js, Node.js, Spring Boot, MySQL, MongoDB, JavaScript, Java');
+    }
+
+    // ---------- Based in Pune / location confirmation ----------
+    if (
+        (normalizedQ.includes('based in pune') || normalizedQ.includes('based in') && normalizedQ.includes('pune')) ||
+        (normalizedQ.includes('pune') && normalizedQ.includes('candidates')) ||
+        (normalizedQ.includes('pune') && normalizedQ.includes('preferred'))
+    ) {
+        if (context.options && context.options.length > 0) {
+            const yesOpt = context.options.find(o => o.toLowerCase() === 'yes');
+            if (yesOpt) return yesOpt;
+        }
+        return String(data['based in pune'] ?? data['city'] ?? 'Pune');
+    }
+
+    // ---------- Startup culture / startup hustle ----------
+    if (
+        normalizedQ.includes('startup') ||
+        normalizedQ.includes('hustle') ||
+        (normalizedQ.includes('highgrowth') || normalizedQ.includes('high-growth') || normalizedQ.includes('high growth'))
+    ) {
+        if (context.options && context.options.length > 0) {
+            const yesOpt = context.options.find(o => o.toLowerCase() === 'yes');
+            if (yesOpt) return yesOpt;
+        }
+        return 'Yes';
+    }
+
+    // ---------- Education completed / pre-placement offer confirmation ----------
+    if (
+        normalizedQ.includes('completed their education') ||
+        normalizedQ.includes('completed your education') ||
+        normalizedQ.includes('completed education') ||
+        (normalizedQ.includes('preplacement') || normalizedQ.includes('pre-placement'))
+    ) {
+        if (context.options && context.options.length > 0) {
+            const yesOpt = context.options.find(o => o.toLowerCase() === 'yes');
+            if (yesOpt) return yesOpt;
+        }
+        return String(data['education completed'] ?? 'Yes');
+    }
+
+    // ---------- Build / deployed functional tech project (MVP) ----------
+    if (
+        (normalizedQ.includes('built') && (normalizedQ.includes('product') || normalizedQ.includes('project') || normalizedQ.includes('mvp'))) ||
+        (normalizedQ.includes('build') && normalizedQ.includes('software')) ||
+        (normalizedQ.includes('deployed') && normalizedQ.includes('project'))
+    ) {
+        if (context.options && context.options.length > 0) {
+            const yesOpt = context.options.find(o => o.toLowerCase() === 'yes');
+            if (yesOpt) return yesOpt;
+        }
+        return 'Yes';
+    }
+
+    // ---------- Available to travel internationally ----------
+    if (
+        (normalizedQ.includes('travel') && normalizedQ.includes('international')) ||
+        normalizedQ.includes('available to travel')
+    ) {
+        return String(data['country'] ?? 'India');
+    }
+
     return null;
 };
 
@@ -772,10 +1259,19 @@ const getAnswer = async (questionText, userData, context = {}) => {
         'compensation', 'package', 'lpa', 'sponsorship', 'sponsor',
         'relocat', 'remote', 'work from home', 'education', 'degree',
         'bachelor', 'master', 'phd', 'graduation', 'certificat',
-        'cover letter', 'summary', 'about yourself', 'why us'
+        'cover letter', 'summary', 'about yourself', 'why us',
+        // Task 6: expanded set for descriptive / open-ended questions
+        'describe', 'explain', 'tell us', 'how many', 'what is your',
+        'project', 'achievement', 'accomplishment', 'proud of',
+        'skill', 'strength', 'weakness', 'area of improvement',
+        'motivation', 'goal', 'expectation', 'preferred',
+        'reason for', 'why are you', 'why do you want',
+        'work arrangement', 'work model', 'hybrid', 'availability',
+        'cgpa', 'gpa', 'percentage', 'aggregate', 'field of study'
     ];
 
-    const isDynamicQuestion = DYNAMIC_KEYWORDS.some(kw => normalized.includes(kw));
+    const isDynamicQuestion = DYNAMIC_KEYWORDS.some(kw => normalized.includes(kw)) &&
+        !/\b(gender|email|name|phone|mobile|contact|address|pincode|zip|linkedin|github|website|job)\b/.test(normalized);
 
     // Helper to evaluate static rules and fuzzy matches
     const getStaticAnswer = (normQ, uData, ctx) => {
@@ -793,7 +1289,22 @@ const getAnswer = async (questionText, userData, context = {}) => {
         }
         if (ruleAnswer !== null) return ruleAnswer;
 
-        const fuzzyAnswer = getBestFuzzyMatch(normQ, uData);
+        let fuzzyAnswer = getBestFuzzyMatch(normQ, uData);
+        if (fuzzyAnswer !== null && ctx.options && ctx.options.length > 0) {
+            const lowerOpts = ctx.options.map(o => o.toLowerCase());
+            const isYesNoField = lowerOpts.includes('yes') && lowerOpts.includes('no') && ctx.options.length <= 3;
+            if (isYesNoField) {
+                const fuzzyAnswerLower = fuzzyAnswer.toLowerCase();
+                if (!lowerOpts.includes(fuzzyAnswerLower)) {
+                    // Fuzzy answer is not a valid option — discard it
+                    fuzzyAnswer = null;
+                }
+            }
+            // Discard job title fuzzy matching if the question is salutation prefix title
+            if (normQ === 'title' && ctx.options.some(o => /mr|ms|dr/i.test(o))) {
+                fuzzyAnswer = null;
+            }
+        }
         if (fuzzyAnswer !== null) return fuzzyAnswer;
 
         return null;
@@ -828,7 +1339,12 @@ const getAnswer = async (questionText, userData, context = {}) => {
 
     // 4. Final safety-net: obvious yes/no questions default to "Yes"
     const isYesNo = /\b(are you|do you|have you|can you|will you|would you|is your|were you|did you)\b/i.test(questionText) && !/\b(how many|how much|what|who|where|when|why|describe|explain)\b/i.test(questionText);
-    if (isYesNo) return 'Yes';
+    const hasYesNoOptions = context.options && 
+        context.options.map(o => o.toLowerCase()).includes('yes') && 
+        context.options.map(o => o.toLowerCase()).includes('no') &&
+        context.options.length <= 3;
+
+    if (isYesNo || hasYesNoOptions) return 'Yes';
 
     return null;
 };

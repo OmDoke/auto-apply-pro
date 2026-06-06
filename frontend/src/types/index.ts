@@ -34,13 +34,9 @@ export interface Preferences {
 
 export const agents: { id: string; name: string; desc: string; stub?: boolean }[] = [
   { id: 'LinkedIn Agent', name: 'LinkedIn Auto-Apply', desc: 'Easy Apply for jobs' },
-  { id: 'LinkedIn Post Scraper', name: 'LinkedIn Posts', desc: 'Scrape hiring posts matching your profile' },
   { id: 'Hirist Agent', name: 'Hirist Auto-Apply', desc: 'Easy Apply for jobs with Playwright' },
   { id: 'Naukri Agent', name: 'Naukri visibility', desc: 'Profile bounce & refresh' },
-  { id: 'Indeed Agent', name: 'Indeed Agent', desc: 'Scan and apply to jobs on Indeed using Easy Apply', stub: false },
-  { id: 'Glassdoor Agent', name: 'Glassdoor Agent', desc: 'Scan and apply to jobs on Glassdoor (Coming Soon)', stub: true },
-  { id: 'Wellfound Agent', name: 'Wellfound Agent', desc: 'Auto-apply to startups on Wellfound (Coming Soon)', stub: true },
-  { id: 'Aggregator Agent', name: 'Job Aggregator', desc: 'Scrape leads to JSON [STUB]', stub: true }
+  { id: 'Indeed Agent', name: 'Indeed Agent', desc: 'Scan and apply to jobs on Indeed using Easy Apply' },
 ];
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';

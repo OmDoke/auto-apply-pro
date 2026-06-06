@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { Terminal, ChevronRight } from 'lucide-react';
 
 interface LogLineProps {
@@ -34,6 +34,29 @@ interface LiveLogsProps {
 }
 
 export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: LiveLogsProps) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the user has scrolled up (pausing auto-scroll)
+  const userScrolledUp = useRef(false);
+
+  // When user scrolls manually, check if they've gone up
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // If more than 100px from bottom → user scrolled up, pause auto-scroll
+    userScrolledUp.current = distanceFromBottom > 100;
+  }, []);
+
+  // Auto-scroll to bottom only if user hasn't scrolled up
+  useEffect(() => {
+    if (!logsOpen) return;
+    if (userScrolledUp.current) return;
+    const el = scrollContainerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [logs, logsOpen]);
+
   return (
     <div className="card overflow-hidden anim-fade-up delay-300">
       {/* Log header */}
@@ -63,7 +86,12 @@ export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: 
       </button>
 
       {logsOpen && (
-        <div className="h-72 overflow-y-auto p-5" style={{ background: 'rgba(4, 6, 10, 0.8)' }}>
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="h-72 overflow-y-auto p-5"
+          style={{ background: 'rgba(4, 6, 10, 0.8)' }}
+        >
           {logs.length === 0 ? (
             <div className="empty-state py-12">
               <div className="empty-icon">

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
-  Square, Search, MapPin, Sparkles, Layers,
+  Square, Search, MapPin, Layers,
 } from 'lucide-react';
 import { SystemState, Preferences, agents } from '../types';
 import { apiService } from '../services/api';
@@ -46,9 +46,6 @@ export default function AgentDashboard({
   const totalActive = agents.filter(a => !a.stub).length;
   const progressPct = totalActive > 0 ? Math.round((completedCount / totalActive) * 100) : 0;
 
-  useEffect(() => {
-    if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: 'smooth' });
-  }, [state.logs]);
 
   useEffect(() => {
     let mounted = true;
@@ -126,13 +123,9 @@ export default function AgentDashboard({
                   className="input pl-9 w-36"
                 />
               </div>
-              {isRunning ? (
+              {isRunning && (
                 <button onClick={handleStop} className="btn-danger">
                   <Square fill="currentColor" className="w-3.5 h-3.5" /> Stop
-                </button>
-              ) : (
-                <button onClick={handleStartAll} className="btn-primary">
-                  <Sparkles className="w-3.5 h-3.5" /> Start All
                 </button>
               )}
             </div>

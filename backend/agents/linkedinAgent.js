@@ -151,6 +151,15 @@ const handleCombobox = async (page, inputHandle, textValue) => {
             'div[data-test-typeahead-item]',
             'ul.fb-autocomplete__suggestions li',
             'li[role="option"]',
+            '.ui-autocomplete li',
+            '.ui-menu-item',
+            '.ui-menu-item-wrapper',
+            '.select2-results__option',
+            '.select2-result',
+            '[class*="select2-results"]',
+            '[class*="typeahead"] li',
+            '[class*="autocomplete"] li',
+            '[class*="suggestions"] li',
         ];
 
         let dropdownFound = false;
@@ -183,6 +192,15 @@ const handleCombobox = async (page, inputHandle, textValue) => {
                 'div[data-test-typeahead-item]',
                 'ul.fb-autocomplete__suggestions li',
                 'li[role="option"]',
+                '.ui-autocomplete li',
+                '.ui-menu-item',
+                '.ui-menu-item-wrapper',
+                '.select2-results__option',
+                '.select2-result',
+                '[class*="select2-results"]',
+                '[class*="typeahead"] li',
+                '[class*="autocomplete"] li',
+                '[class*="suggestions"] li',
             ];
             for (const sel of allSelectors) {
                 const items = Array.from(document.querySelectorAll(sel));
@@ -324,75 +342,128 @@ const handleNativeSelect = async (page, selectHandle, value) => {
 const fillFormFields = async (page, answers) => {
     if (Object.keys(answers).length === 0) return 'OK';
 
+    // ── TASK 2 FIX: Stamp each group with data-aagroup to prevent DOM drift ──
+    const GROUP_SELECTOR =
+        '.jobs-easy-apply-form-section__grouping, ' +
+        '.fb-dash-form-element, ' +
+        '.jobs-easy-apply-form-element__fields, ' +
+        '.jobs-easy-apply-form-element, ' +
+        'fieldset.fb-form-element, ' +
+        '.artdeco-form-item, ' +
+        '.artdeco-text-input--container';
+
+    // ── TASK 8: Widen custom-dropdown detector to catch LinkedIn data-test-* variants ──
+    const CUSTOM_DROPDOWN_SELECTOR =
+        'button[aria-haspopup="listbox"], ' +
+        'button[aria-expanded="false"][aria-haspopup], ' +
+        '[role="combobox"]:not(input):not(textarea), ' +
+        '.artdeco-dropdown__trigger, ' +
+        '.fb-form-element-label + div button, ' +
+        'button[data-test-text-entity-list-form-select], ' +
+        'button[data-test-single-typeahead-entity-form-component]';
+
+    await page.evaluate((sel) => {
+        const groups = Array.from(document.querySelectorAll(sel));
+        groups.forEach((g, i) => g.setAttribute('data-aagroup', String(i)));
+    }, GROUP_SELECTOR);
+
     // Collect all form groups with their metadata
-    const formGroups = await page.evaluate(() => {
-        const groups = Array.from(document.querySelectorAll(
-            '.jobs-easy-apply-form-section__grouping, ' +
-            '.fb-dash-form-element, ' +
-            '.jobs-easy-apply-form-element__fields, ' +
-            '.jobs-easy-apply-form-element, ' +
-            'fieldset.fb-form-element, ' +
-            '.artdeco-form-item, ' +
-            '.artdeco-text-input--container'
-        ));
-        return groups.map((g, idx) => {
-            let labelEl = g.querySelector('label, .fb-dash-form-element__label, legend, .artdeco-text-input__label, .fb-form-element-label, span[data-test-form-builder-radio-button-form-component__title]');
+    const formGroups = await page.evaluate((customDropSel) => {
+        const groups = Array.from(document.querySelectorAll('[data-aagroup]'));
+        return groups.map((g) => {
+            const idx = parseInt(g.getAttribute('data-aagroup'), 10);
+
+            // ── Label extraction — covers all LinkedIn question patterns ──
+            let labelEl =
+                g.querySelector('legend') ||
+                g.querySelector('[data-test-form-builder-radio-button-form-component__title]') ||
+                g.querySelector('[data-test-form-element-label]') ||
+                g.querySelector('.fb-dash-form-element__label') ||
+                g.querySelector('.fb-form-element-label') ||
+                g.querySelector('.artdeco-text-input__label') ||
+                g.querySelector('label');
+
             if (!labelEl) {
-                labelEl = g.querySelector('span.t-14, h3.t-14, .jobs-easy-apply-form-element span[aria-hidden="true"], .jobs-easy-apply-form-section__grouping span.visually-hidden');
+                labelEl =
+                    g.querySelector('span.t-14') ||
+                    g.querySelector('h3.t-14') ||
+                    g.querySelector('.jobs-easy-apply-form-element span[aria-hidden="true"]') ||
+                    g.querySelector('.jobs-easy-apply-form-section__grouping span.visually-hidden');
             }
+
             let type = 'text';
             let options = [];
 
             const selectEl = g.querySelector('select');
-            const customDropdownBtn = g.querySelector('button[aria-haspopup="listbox"], button[aria-expanded], [role="combobox"]:not(input), .artdeco-dropdown__trigger, .fb-form-element-label + div button');
-            
+            const customDropdownBtn = g.querySelector(customDropSel);
+            const radioInputs = Array.from(g.querySelectorAll('input[type="radio"]'));
+            const checkboxInputs = Array.from(g.querySelectorAll('input[type="checkbox"]'));
+            const dateInput = g.querySelector('input[type="date"]');
+
             if (selectEl) {
                 type = 'select';
                 options = Array.from(selectEl.options)
                     .filter(o => o.value && !o.text.toLowerCase().includes('select'))
                     .map(o => o.text.trim());
+            } else if (radioInputs.length > 0) {
+                // ── TASK 1 FIX: Detect radio by input[type="radio"] not by label count ──
+                type = 'radio';
+                options = radioInputs.map(inp => {
+                    const lbl = inp.id
+                        ? document.querySelector(`label[for="${inp.id}"]`)
+                        : inp.closest('.fb-form-element__radio, .artdeco-radio, .jobs-easy-apply-form-element__radio')
+                            ?.querySelector('label');
+                    return lbl ? lbl.innerText.trim() : (inp.value || '');
+                }).filter(Boolean);
+            } else if (checkboxInputs.length > 0) {
+                // ── TASK 7: Detect checkbox groups (including single checkboxes) ──
+                type = 'checkbox';
+                options = checkboxInputs.map(inp => {
+                    const lbl = inp.id
+                        ? document.querySelector(`label[for="${inp.id}"]`)
+                        : inp.closest('.fb-form-element__checkbox, .artdeco-checkbox')?.querySelector('label');
+                    return lbl ? lbl.innerText.trim() : (inp.value || '');
+                }).filter(Boolean);
+            } else if (dateInput) {
+                // ── TASK 11: Detect date-picker inputs ──
+                type = 'date';
             } else if (customDropdownBtn) {
                 type = 'custom-dropdown';
             }
 
-            const radioEls = Array.from(g.querySelectorAll('label'));
-            if (!selectEl && !customDropdownBtn && radioEls.length > 0 && g.querySelector('input[type="radio"]')) {
-                type = 'radio';
-                options = radioEls.map(r => r.innerText.trim());
-            }
-
             return { idx, questionText: labelEl ? labelEl.innerText.trim() : '', type, options };
         }).filter(g => g.questionText !== '');
-    });
+    }, CUSTOM_DROPDOWN_SELECTOR);
 
     for (const { idx, questionText, type, options } of formGroups) {
         // Get the best answer for this question
-        const answer = await getAnswer(questionText, answers, { type, options });
-        if (!answer) continue;
+        const answer = await getAnswer(questionText, answers, { type, options, source: 'linkedin' });
 
-        // NOTE: This selector MUST match the one used during group collection above
-        // (7 selectors including .artdeco-text-input--container) so that idx stays accurate.
-        const groupSelector = '.jobs-easy-apply-form-section__grouping, ' +
-            '.fb-dash-form-element, ' +
-            '.jobs-easy-apply-form-element__fields, ' +
-            '.jobs-easy-apply-form-element, ' +
-            'fieldset.fb-form-element, ' +
-            '.artdeco-form-item, ' +
-            '.artdeco-text-input--container';
+        // ── TASK 5 FIX: Log unanswered questions — never silently skip ──
+        if (!answer) {
+            console.log(`  ⚠️  [UNANSWERED] "${questionText}" (type: ${type}${options.length ? ', options: ' + JSON.stringify(options.slice(0, 5)) : ''})`);
+            // For radio/select/checkbox with options, auto-select first as fallback
+            if ((type === 'radio' || type === 'select' || type === 'checkbox') && options.length > 0) {
+                console.log(`  ↳ Auto-fallback: using first option "${options[0]}"`);
+            } else {
+                continue;
+            }
+        }
 
-        console.log(`  [Q${idx}] "${questionText}" (${type}) → answer: "${answer}"${options.length ? ' | options: ' + JSON.stringify(options.slice(0, 4)) : ''}`);
+        const effectiveAnswer = answer || options[0];
+
+        // ── TASK 2: Always look up by data-aagroup to avoid index drift ──
+        const getGroup = () => page.$(`[data-aagroup="${idx}"]`);
+
+        console.log(`  [Q${idx}] "${questionText}" (${type}) → answer: "${effectiveAnswer}"${options.length ? ' | options: ' + JSON.stringify(options.slice(0, 4)) : ''}`);
 
         if (type === 'select') {
-            // Native <select> element
             try {
-                const groups = await page.$$(groupSelector);
-                const group = groups[idx];
+                const group = await getGroup();
                 if (!group) continue;
-
                 const selectHandle = await group.$('select');
                 if (!selectHandle) continue;
-
-                const result = await handleNativeSelect(page, selectHandle, answer);
+                const result = await handleNativeSelect(page, selectHandle, effectiveAnswer);
                 if (result === 'SKIP_JOB') return 'SKIP_JOB';
             } catch (e) {
                 console.log(`  Warning: could not fill select for "${questionText}":`, e.message);
@@ -400,78 +471,195 @@ const fillFormFields = async (page, answers) => {
 
         } else if (type === 'custom-dropdown') {
             try {
-                const groups = await page.$$(groupSelector);
-                const group = groups[idx];
+                const group = await getGroup();
                 if (!group) continue;
-                
-                // Get the trigger button
-                const triggerHandle = await group.$('button[aria-haspopup="listbox"], button[aria-expanded], [role="combobox"]:not(input), .artdeco-dropdown__trigger, .fb-form-element-label + div button');
+                const triggerHandle = await group.$(CUSTOM_DROPDOWN_SELECTOR);
                 if (!triggerHandle) continue;
-                
-                // Click to open the dropdown
+
                 await triggerHandle.click();
                 await new Promise(r => setTimeout(r, 800));
-                
-                // Collect visible options from the listbox
-                const availableOptions = await page.evaluate(() => {
-                    return Array.from(document.querySelectorAll('[role="listbox"] [role="option"], [role="option"]'))
+
+                const availableOptions = await page.evaluate(() =>
+                    Array.from(document.querySelectorAll('[role="listbox"] [role="option"], [role="option"]'))
                         .filter(el => el.offsetParent !== null)
-                        .map(el => (el.innerText || el.textContent || '').trim());
-                });
-                
-                // Re-ask getAnswer with the options list so AI/rules can pick the right one
-                const refinedAnswer = await getAnswer(questionText, answers, { type: 'custom-dropdown', options: availableOptions });
-                
-                // Click the matching option
+                        .map(el => (el.innerText || el.textContent || '').trim())
+                );
+
+                const refinedAnswer = await getAnswer(questionText, answers, { type: 'custom-dropdown', options: availableOptions, source: 'linkedin' });
+
                 const clicked = await page.evaluate((target) => {
-                    const options = Array.from(document.querySelectorAll('[role="listbox"] [role="option"], [role="option"]'))
+                    const opts = Array.from(document.querySelectorAll('[role="listbox"] [role="option"], [role="option"]'))
                         .filter(el => el.offsetParent !== null);
-                    for (const opt of options) {
+                    for (const opt of opts) {
                         const text = (opt.innerText || opt.textContent || '').trim().toLowerCase();
                         if (text === target.toLowerCase() || text.includes(target.toLowerCase()) || target.toLowerCase().includes(text)) {
                             opt.click();
                             return true;
                         }
                     }
-                    // Fallback: pick first option
-                    if (options.length > 0) { options[0].click(); return true; }
+                    if (opts.length > 0) { opts[0].click(); return true; }
                     return false;
-                }, refinedAnswer || answer);
-                
-                if (!clicked) {
-                    // Press Escape to close if nothing matched
-                    await page.keyboard.press('Escape');
-                }
+                }, refinedAnswer || effectiveAnswer);
+
+                if (!clicked) await page.keyboard.press('Escape');
                 await new Promise(r => setTimeout(r, 400));
             } catch (e) {
                 console.log(`  Warning: could not fill custom dropdown for "${questionText}":`, e.message);
             }
 
         } else if (type === 'radio') {
-            // Radio buttons — click the label that matches
+            // ── TASK 1 FIX: React-compatible radio dispatch via input[type="radio"] ──
             try {
-                const groups = await page.$$(groupSelector);
-                const group = groups[idx];
+                const group = await getGroup();
                 if (!group) continue;
 
-                const radioLabels = await group.$$('label');
-                for (const lbl of radioLabels) {
-                    const text = await page.evaluate(el => el.innerText.trim(), lbl);
-                    if (text.toLowerCase() === answer.toLowerCase() || text.toLowerCase().includes(answer.toLowerCase())) {
-                        await lbl.click();
+                const radioInputs = await group.$$('input[type="radio"]');
+                let clicked = false;
+
+                for (const input of radioInputs) {
+                    const labelText = await page.evaluate(inp => {
+                        const id = inp.id;
+                        const lbl = id
+                            ? document.querySelector(`label[for="${id}"]`)
+                            : inp.closest('.fb-form-element__radio, .artdeco-radio, .jobs-easy-apply-form-element__radio')
+                                ?.querySelector('label');
+                        return lbl ? lbl.innerText.trim() : (inp.value || '');
+                    }, input);
+
+                    if (
+                        labelText.toLowerCase() === effectiveAnswer.toLowerCase() ||
+                        labelText.toLowerCase().includes(effectiveAnswer.toLowerCase()) ||
+                        effectiveAnswer.toLowerCase().includes(labelText.toLowerCase())
+                    ) {
+                        // Method 1: Click the associated label
+                        await page.evaluate(inp => {
+                            const id = inp.id;
+                            const lbl = id
+                                ? document.querySelector(`label[for="${id}"]`)
+                                : inp.closest('.fb-form-element__radio, .artdeco-radio, .jobs-easy-apply-form-element__radio')
+                                    ?.querySelector('label');
+                            if (lbl) lbl.click();
+                            else inp.click();
+                        }, input);
                         await new Promise(r => setTimeout(r, 300));
+
+                        // Method 2: If still not checked, dispatch React-compatible synthetic events
+                        const isChecked = await page.evaluate(el => el.checked, input);
+                        if (!isChecked) {
+                            await page.evaluate(inp => {
+                                const nativeSet = Object.getOwnPropertyDescriptor(
+                                    window.HTMLInputElement.prototype, 'checked'
+                                ).set;
+                                nativeSet.call(inp, true);
+                                inp.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                            }, input);
+                            await new Promise(r => setTimeout(r, 200));
+                        }
+
+                        clicked = true;
+                        console.log(`  ✔ Radio selected: "${labelText}"`);
                         break;
                     }
+                }
+
+                if (!clicked) {
+                    const availableLabels = await Promise.all(radioInputs.map(inp =>
+                        page.evaluate(inp => {
+                            const id = inp.id;
+                            const lbl = id ? document.querySelector(`label[for="${id}"]`) : null;
+                            return lbl ? lbl.innerText.trim() : (inp.value || '');
+                        }, inp)
+                    ));
+                    console.log(`  ⚠️  Radio: no option matched "${effectiveAnswer}" for "${questionText}"`);
+                    console.log(`     Available: ${JSON.stringify(availableLabels)}`);
                 }
             } catch (e) {
                 console.log(`  Warning: could not fill radio for "${questionText}":`, e.message);
             }
 
+        } else if (type === 'checkbox') {
+            // ── TASK 7: Multi-select checkbox handling ──
+            try {
+                const group = await getGroup();
+                if (!group) continue;
+
+                const checkboxInputs = await group.$$('input[type="checkbox"]');
+                for (const cb of checkboxInputs) {
+                    const labelText = await page.evaluate(cb => {
+                        const lbl = cb.id
+                            ? document.querySelector(`label[for="${cb.id}"]`)
+                            : cb.closest('.fb-form-element__checkbox')?.querySelector('label');
+                        return lbl ? lbl.innerText.trim() : (cb.value || '');
+                    }, cb);
+
+                    const ansLower = effectiveAnswer.toLowerCase();
+                    const labelLower = labelText.toLowerCase();
+                    const isSingleCheckbox = checkboxInputs.length === 1;
+
+                    const shouldCheck = 
+                        (isSingleCheckbox && (ansLower === 'yes' || ansLower === 'true' || ansLower === '1')) ||
+                        ansLower.includes(labelLower) ||
+                        labelLower.includes(ansLower);
+
+                    if (shouldCheck) {
+                        const isChecked = await page.evaluate(el => el.checked, cb);
+                        if (!isChecked) {
+                            await page.evaluate(inp => {
+                                const lbl = inp.id ? document.querySelector(`label[for="${inp.id}"]`) : null;
+                                if (lbl) lbl.click();
+                                else inp.click();
+                                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                            }, cb);
+                            await new Promise(r => setTimeout(r, 200));
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log(`  Warning: could not fill checkbox for "${questionText}":`, e.message);
+            }
+
+        } else if (type === 'date') {
+            // ── TASK 11: Date-picker input handling ──
+            try {
+                const group = await getGroup();
+                if (!group) continue;
+                const dateInput = await group.$('input[type="date"]');
+                if (!dateInput) continue;
+                // Normalise to YYYY-MM-DD
+                // Supports: DD/MM/YYYY (Indian), MM/DD/YYYY (US), or YYYY-MM-DD
+                let dateVal = effectiveAnswer;
+                if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateVal)) {
+                    const parts = dateVal.split('/');
+                    const firstNum = parseInt(parts[0]);
+                    // If first part > 12, it's DD/MM/YYYY (day > 12 can't be a month)
+                    if (firstNum > 12) {
+                        // DD/MM/YYYY → YYYY-MM-DD
+                        const [d, m, y] = parts;
+                        dateVal = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+                    } else {
+                        // MM/DD/YYYY → YYYY-MM-DD
+                        const [m, d, y] = parts;
+                        dateVal = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+                    }
+                }
+                await page.evaluate((el, val) => {
+                    const nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    nativeSet.call(el, val);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }, dateInput, dateVal);
+                await new Promise(r => setTimeout(r, 300));
+                console.log(`  ✔ Date set: "${dateVal}"`);
+            } catch (e) {
+                console.log(`  Warning: could not fill date for "${questionText}":`, e.message);
+            }
+
         } else {
             // Text / number / email / tel / textarea
             try {
-                const groups = await page.$$(groupSelector);
-                const group = groups[idx];
+                const group = await getGroup();
                 if (!group) continue;
 
                 const inputHandle = await group.$(
@@ -480,12 +668,9 @@ const fillFormFields = async (page, answers) => {
                 );
                 if (!inputHandle) continue;
 
-                // Check if field already has the correct value
                 const currentVal = await page.evaluate(el => el.value, inputHandle);
-                if (currentVal === String(answer)) continue;
+                if (currentVal === String(effectiveAnswer)) continue;
 
-                // Detect city/location fields or other combobox fields (like experience dropdowns that look like inputs)
-                // We must type and then click the dropdown suggestion, NOT just set the value.
                 const qLower = questionText.toLowerCase();
                 const isCityField = (
                     qLower.includes('city') ||
@@ -496,27 +681,23 @@ const fillFormFields = async (page, answers) => {
                   && !qLower.includes('address');
 
                 const isCombobox = await page.evaluate(el => {
-                    return el.getAttribute('role') === 'combobox' || 
+                    return el.getAttribute('role') === 'combobox' ||
                            el.classList.contains('search-basic-typeahead-input') ||
                            el.closest('.search-basic-typeahead') !== null ||
                            el.hasAttribute('aria-autocomplete');
                 }, inputHandle);
 
                 if (isCityField || isCombobox) {
-                    await handleCombobox(page, inputHandle, answer);
+                    await handleCombobox(page, inputHandle, effectiveAnswer);
                 } else {
-                    // Normal field: Ctrl+A → Delete → type
-                    await typeIntoInput(page, inputHandle, answer);
+                    await typeIntoInput(page, inputHandle, effectiveAnswer);
                 }
-                
-                // IF CONDITION: if first input field fail then add select for dropdown
+
                 const finalVal = await page.evaluate(el => el.value, inputHandle);
-                if (finalVal !== String(answer)) {
+                if (finalVal !== String(effectiveAnswer)) {
                     console.log(`  Typing failed for "${questionText}". Checking for custom dropdown...`);
-                    // Try custom dropdown trigger on the same group
-                    const groups2 = await page.$$(groupSelector);
-                    const grp2 = groups2[idx];
-                    const customTrigger = grp2 && await grp2.$('button[aria-haspopup="listbox"], button[aria-expanded], .fb-form-element-label + div button');
+                    const group2 = await getGroup();
+                    const customTrigger = group2 && await group2.$(CUSTOM_DROPDOWN_SELECTOR);
                     if (customTrigger) {
                         await customTrigger.click();
                         await new Promise(r => setTimeout(r, 800));
@@ -526,9 +707,9 @@ const fillFormFields = async (page, answers) => {
                                 if ((o.innerText || '').toLowerCase().includes(val.toLowerCase())) { o.click(); return; }
                             }
                             if (opts[0]) opts[0].click();
-                        }, answer);
+                        }, effectiveAnswer);
                     } else {
-                        await clickDropdownOption(page, inputHandle, answer);
+                        await clickDropdownOption(page, inputHandle, effectiveAnswer);
                     }
                 }
 
@@ -593,6 +774,19 @@ const handleResumeStep = async (page) => {
 };
 
 // ---------------------------------------------------------------------------
+// Task 10: Helper — save a screenshot for debugging failed applications
+// ---------------------------------------------------------------------------
+const screenshotOnFailure = async (page, label) => {
+    try {
+        const screenshotDir = path.join(__dirname, '..', 'data', 'screenshots');
+        if (!fs.existsSync(screenshotDir)) fs.mkdirSync(screenshotDir, { recursive: true });
+        const screenshotPath = path.join(screenshotDir, `fail_${label}_${Date.now()}.png`);
+        await page.screenshot({ path: screenshotPath, fullPage: false });
+        console.log(`  📸 Screenshot saved: ${screenshotPath}`);
+    } catch (_) { /* non-fatal */ }
+};
+
+// ---------------------------------------------------------------------------
 // Core: attempt to apply to a single job.
 // Returns: 'submitted', 'skipped', or 'failed'
 // ---------------------------------------------------------------------------
@@ -620,7 +814,20 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
 
     while (maxSteps > 0 && !applicationSubmitted) {
         maxSteps--;
-        await new Promise(r => setTimeout(r, 1500));
+        // Wait for any loading spinner to disappear
+        try {
+            let loaderVisible = true;
+            for (let spinWait = 0; spinWait < 15; spinWait++) {
+                loaderVisible = await page.evaluate(() => {
+                    const loader = document.querySelector('.artdeco-loader, [class*="loader"], [class*="spinner"]');
+                    return !!(loader && loader.offsetParent !== null);
+                });
+                if (!loaderVisible) break;
+                await new Promise(r => setTimeout(r, 500));
+            }
+        } catch (e) {
+            // ignore
+        }
 
         // A) Handle resume step
         await handleResumeStep(page);
@@ -680,10 +887,19 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
             clicked = true;
             await new Promise(r => setTimeout(r, 1500));
 
+            // ── Task 9: Log error text + attempt targeted re-fill ──
             const reviewErrors = await page.$$('.artdeco-inline-feedback--error');
             if (reviewErrors.length > 0) {
-                console.log(`  Validation errors after Review (attempt ${attemptNum}).`);
-                return 'failed';
+                const msgs = await Promise.all(reviewErrors.map(e => page.evaluate(el => el.innerText.trim(), e)));
+                console.log(`  ❌ Validation errors after Review: ${msgs.join(' | ')}`);
+                // One re-fill attempt on errored fields before giving up
+                await fillFormFields(page, presetAnswers);
+                await new Promise(r => setTimeout(r, 800));
+                const stillErrors = await page.$$('.artdeco-inline-feedback--error');
+                if (stillErrors.length > 0) {
+                    await screenshotOnFailure(page, 'review');
+                    return 'failed';
+                }
             }
 
         } else if (nextBtn) {
@@ -694,19 +910,30 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
             clicked = true;
             await new Promise(r => setTimeout(r, 1500));
 
+            // ── Task 9: Log error text + attempt targeted re-fill ──
             const errors = await page.$$('.artdeco-inline-feedback--error');
             if (errors.length > 0) {
-                console.log(`  Validation errors on step (attempt ${attemptNum}).`);
-                return 'failed';
+                const msgs = await Promise.all(errors.map(e => page.evaluate(el => el.innerText.trim(), e)));
+                console.log(`  ❌ Validation errors on step: ${msgs.join(' | ')}`);
+                // One re-fill attempt before giving up
+                await fillFormFields(page, presetAnswers);
+                await new Promise(r => setTimeout(r, 800));
+                const stillErrors = await page.$$('.artdeco-inline-feedback--error');
+                if (stillErrors.length > 0) {
+                    await screenshotOnFailure(page, 'next');
+                    return 'failed';
+                }
             }
         }
 
         if (!clicked && !applicationSubmitted) {
             console.log('  Could not find Next/Submit button on this step.');
+            await screenshotOnFailure(page, 'no-button');
             return 'failed';
         }
     }
 
+    if (!applicationSubmitted) await screenshotOnFailure(page, 'max-steps');
     return applicationSubmitted ? 'submitted' : 'failed';
 };
 
@@ -819,7 +1046,11 @@ const run = async () => {
 
                         const fetchedInfo = await page.evaluate(() => {
                             const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .t-24');
-                            const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, .t-16');
+                            const companyEl = 
+                                document.querySelector('.job-details-jobs-unified-top-card__company-name') ||
+                                document.querySelector('.jobs-unified-top-card__company-name') ||
+                                document.querySelector('.job-details-jobs-unified-top-card__primary-description a') ||
+                                document.querySelector('.job-details-jobs-unified-top-card__primary-description');
                             return {
                                 title: titleEl ? titleEl.innerText.trim() : 'Unknown Job',
                                 company: companyEl ? companyEl.innerText.trim() : 'Unknown Company',
