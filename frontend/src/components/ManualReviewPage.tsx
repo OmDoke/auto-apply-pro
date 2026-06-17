@@ -109,15 +109,24 @@ export default function ManualReviewPage({ onBack }: { onBack: () => void }) {
               </div>
 
               {/* CTA */}
-              <a
-                href={job.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-primary w-full justify-center py-4 rounded-xl text-base"
-              >
-                <ExternalLink className="w-5 h-5" />
-                Open Job & Apply Manually
-              </a>
+              <div className="flex gap-3">
+                <a
+                  href={job.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary flex-1 justify-center py-4 rounded-xl text-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Retry (Default Browser)
+                </a>
+                <button
+                  onClick={() => apiService.openUrl(job.url)}
+                  className="btn bg-indigo-500 hover:bg-indigo-600 text-white flex-1 justify-center py-4 rounded-xl text-sm transition-colors border-none"
+                >
+                  <Globe className="w-4 h-4" />
+                  Retry (Agent Chrome)
+                </button>
+              </div>
 
               {/* Navigation */}
               <div className="grid grid-cols-2 gap-3">
@@ -185,14 +194,24 @@ export default function ManualReviewPage({ onBack }: { onBack: () => void }) {
                         )}
                       </p>
                     </div>
-                    <a
-                      href={j.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn btn-ghost shrink-0 py-2 px-4 text-xs opacity-70 group-hover:opacity-100"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" /> Open
-                    </a>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => apiService.openUrl(j.url)}
+                        className="btn btn-ghost py-2 px-3 text-xs opacity-70 group-hover:opacity-100 hover:text-indigo-400"
+                        title="Open in Agent Chrome"
+                      >
+                        <Globe className="w-3.5 h-3.5" /> Agent Chrome
+                      </button>
+                      <a
+                        href={j.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-ghost py-2 px-3 text-xs opacity-70 group-hover:opacity-100"
+                        title="Open in Default Browser"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" /> Open
+                      </a>
+                    </div>
                   </div>
                 ))}
               </div>

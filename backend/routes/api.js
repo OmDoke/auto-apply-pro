@@ -38,6 +38,29 @@ router.post('/open-chrome', (req, res) => {
     }
 });
 
+router.post('/open-url', (req, res) => {
+    const { url } = req.body;
+    if (!url) {
+        return res.status(400).json({ ok: false, message: 'URL is required' });
+    }
+    const chromePath = CHROME_PATHS.find(p => fs.existsSync(p));
+    if (!chromePath) {
+        return res.status(500).json({ ok: false, message: 'Chrome not found. Set CHROME_PATH in .env' });
+    }
+    try {
+        // If we launch Chrome with the URL, it opens a new tab in the existing instance
+        const process = spawn(chromePath, [
+            '--remote-debugging-port=9222',
+            url
+        ], { detached: true, stdio: 'ignore' });
+        process.unref();
+        console.log(`[Chrome] Opened URL: ${url}`);
+        res.json({ ok: true, message: `Opened ${url} in Chrome` });
+    } catch (e) {
+        res.status(500).json({ ok: false, message: e.message });
+    }
+});
+
 router.get('/chrome-status', (req, res) => {
     const options = { hostname: 'localhost', port: 9222, path: '/json/version', timeout: 2000 };
     const probe = http.get(options, (r) => {
@@ -108,6 +131,46 @@ router.delete('/hiring-posts', (req, res) => {
     const hiringPostsPath = path.join(__dirname, '..', 'data', 'hiring_posts.json');
     fs.writeFileSync(hiringPostsPath, '[]');
     res.json({ message: 'Hiring posts list cleared.' });
+});
+
+router.get('/profile', async (req, res) => {
+    const profilePath = path.join(__dirname, '..', 'data', 'user_profile.json');
+    try {
+        const raw = await fs.promises.readFile(profilePath, 'utf8');
+        res.json(JSON.parse(raw));
+    } catch (e) {
+        res.status(404).json({ message: 'Profile not found' });
+    }
+});
+
+router.post('/profile', async (req, res) => {
+    const profilePath = path.join(__dirname, '..', 'data', 'user_profile.json');
+    try {
+        await fs.promises.writeFile(profilePath, JSON.stringify(req.body, null, 2));
+        res.json({ ok: true, message: 'Profile updated successfully' });
+    } catch (e) {
+        res.status(500).json({ ok: false, message: e.message });
+    }
+});
+
+router.get('/answers', async (req, res) => {
+    const answersPath = path.join(__dirname, '..', 'data', 'answers.json');
+    try {
+        const raw = await fs.promises.readFile(answersPath, 'utf8');
+        res.json(JSON.parse(raw));
+    } catch (e) {
+        res.status(404).json({ message: 'Answers not found' });
+    }
+});
+
+router.post('/answers', async (req, res) => {
+    const answersPath = path.join(__dirname, '..', 'data', 'answers.json');
+    try {
+        await fs.promises.writeFile(answersPath, JSON.stringify(req.body, null, 2));
+        res.json({ ok: true, message: 'Answers updated successfully' });
+    } catch (e) {
+        res.status(500).json({ ok: false, message: e.message });
+    }
 });
 
 module.exports = router;

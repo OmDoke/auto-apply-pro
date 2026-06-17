@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal, ChevronRight } from 'lucide-react';
 
 interface LogLineProps {
@@ -37,6 +37,18 @@ export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Tracks whether the user has scrolled up (pausing auto-scroll)
   const userScrolledUp = useRef(false);
+  const [filter, setFilter] = useState<'all' | 'success' | 'error' | 'warning'>('all');
+
+  const filteredLogs = logs.filter(log => {
+    if (filter === 'all') return true;
+    const isError   = log.includes('[ERROR]') || log.includes('Fatal') || log.includes('❌');
+    const isSuccess = log.includes('✓') || log.includes('✅') || log.includes('Applied!');
+    const isWarning = log.includes('⚠️') || log.includes('✗') || log.includes('Warning');
+    if (filter === 'error') return isError;
+    if (filter === 'success') return isSuccess;
+    if (filter === 'warning') return isWarning;
+    return true;
+  });
 
   // When user scrolls manually, check if they've gone up
   const handleScroll = useCallback(() => {
@@ -86,12 +98,40 @@ export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: 
       </button>
 
       {logsOpen && (
-        <div
-          ref={scrollContainerRef}
-          onScroll={handleScroll}
-          className="h-72 overflow-y-auto p-5"
-          style={{ background: 'rgba(4, 6, 10, 0.8)' }}
-        >
+        <>
+          <div className="flex items-center gap-2 px-6 py-3 border-b border-white/[0.06] bg-slate-900/50">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-2">Filter</span>
+            <button 
+              onClick={() => setFilter('all')} 
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filter === 'all' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            >
+              All
+            </button>
+            <button 
+              onClick={() => setFilter('success')} 
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${filter === 'success' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            >
+              ✅ Success
+            </button>
+            <button 
+              onClick={() => setFilter('error')} 
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${filter === 'error' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            >
+              ❌ Errors
+            </button>
+            <button 
+              onClick={() => setFilter('warning')} 
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${filter === 'warning' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+            >
+              ⚠️ Warnings
+            </button>
+          </div>
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            className="h-72 overflow-y-auto p-5"
+            style={{ background: 'rgba(4, 6, 10, 0.8)' }}
+          >
           {logs.length === 0 ? (
             <div className="empty-state py-12">
               <div className="empty-icon">
@@ -102,7 +142,7 @@ export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: 
             </div>
           ) : (
             <div>
-              {logs.map((log, i) => (
+              {filteredLogs.map((log, i) => (
                 <LogLine key={`${i}-${log.slice(0, 12)}`} log={log} idx={i} />
               ))}
               {isRunning && (
@@ -112,6 +152,7 @@ export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: 
           )}
           <div ref={logEndRef} />
         </div>
+        </>
       )}
     </div>
   );

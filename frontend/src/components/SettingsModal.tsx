@@ -9,9 +9,12 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [profile, setProfile] = useState<any>(null);
+  const [answers, setAnswers] = useState<Record<string, string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('contact');
+  const [newQAKey, setNewQAKey] = useState('');
+  const [newQAValue, setNewQAValue] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -21,20 +24,43 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const loadProfile = async () => {
     setLoading(true);
-    const data = await apiService.getProfile();
-    setProfile(data);
+    const [profileData, answersData] = await Promise.all([
+      apiService.getProfile(),
+      apiService.getAnswers()
+    ]);
+    setProfile(profileData);
+    setAnswers(answersData);
     setLoading(false);
   };
 
   const handleSave = async () => {
     setSaving(true);
-    const res = await apiService.updateProfile(profile);
+    const results = await Promise.all([
+      apiService.updateProfile(profile),
+      apiService.updateAnswers(answers)
+    ]);
     setSaving(false);
-    if (res.ok) {
+    
+    const errors = results.filter(r => !r.ok);
+    if (errors.length === 0) {
       onClose();
     } else {
-      alert(res.message);
+      alert(errors.map(e => e.message).join('\n'));
     }
+  };
+
+  const handleAddQA = () => {
+    if (!newQAKey.trim() || !answers) return;
+    setAnswers({ ...answers, [newQAKey.trim()]: newQAValue });
+    setNewQAKey('');
+    setNewQAValue('');
+  };
+
+  const handleRemoveQA = (key: string) => {
+    if (!answers) return;
+    const next = { ...answers };
+    delete next[key];
+    setAnswers(next);
   };
 
   if (!isOpen) return null;
@@ -85,6 +111,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               onClick={() => setActiveTab('salary')}
               icon={DollarSign}
               label="Salary & Prefs"
+            />
+            <div className="pt-4 pb-2">
+              <div className="h-px w-full bg-white/5" />
+            </div>
+            <TabButton 
+              active={activeTab === 'qa_answers'} 
+              onClick={() => setActiveTab('qa_answers')}
+              icon={Briefcase}
+              label="QA Answers"
             />
           </div>
 
@@ -158,6 +193,62 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         onChange={e => setProfile({...profile, preferences: {...profile.preferences, willing_to_relocate: e.target.checked}})}
                         className="w-5 h-5 rounded border-white/10 bg-slate-950 text-indigo-600 focus:ring-indigo-500/50"
                       />
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'qa_answers' && answers && (
+                  <div className="space-y-4 anim-fade-up">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider">QA Database</h3>
+                      <span className="text-xs text-slate-500 font-medium">{Object.keys(answers).length} records</span>
+                    </div>
+                    
+                    <div className="flex gap-2 mb-6">
+                      <input 
+                        type="text" 
+                        placeholder="New Question / Key"
+                        value={newQAKey}
+                        onChange={e => setNewQAKey(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-white/5 rounded-xl px-4 py-2 text-slate-200 text-sm focus:outline-none focus:border-indigo-500/50"
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="Answer / Value"
+                        value={newQAValue}
+                        onChange={e => setNewQAValue(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-white/5 rounded-xl px-4 py-2 text-slate-200 text-sm focus:outline-none focus:border-indigo-500/50"
+                        onKeyDown={e => e.key === 'Enter' && handleAddQA()}
+                      />
+                      <button onClick={handleAddQA} disabled={!newQAKey.trim()} className="btn-primary px-4 rounded-xl text-sm whitespace-nowrap">
+                        Add
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                      {Object.entries(answers).map(([key, value]) => (
+                        <div key={key} className="flex gap-2 group">
+                          <input 
+                            type="text" 
+                            disabled 
+                            value={key} 
+                            className="w-1/3 bg-slate-950/50 border border-transparent rounded-lg px-3 py-2 text-slate-400 text-xs truncate"
+                            title={key}
+                          />
+                          <input 
+                            type="text" 
+                            value={value}
+                            onChange={e => setAnswers({ ...answers, [key]: e.target.value })}
+                            className="flex-1 bg-slate-950 border border-white/5 rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-indigo-500/50 transition-colors"
+                          />
+                          <button 
+                            onClick={() => handleRemoveQA(key)}
+                            className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-all shrink-0"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

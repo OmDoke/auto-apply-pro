@@ -4,6 +4,8 @@ export interface SystemState {
   status: AgentStatus;
   currentAgent: string | null;
   logs: string[];
+  appliedCount?: number;
+  lastRunTimes?: Record<string, string>;
 }
 
 export interface FailedJob {

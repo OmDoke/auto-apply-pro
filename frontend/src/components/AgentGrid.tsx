@@ -2,6 +2,17 @@ import React from 'react';
 import { Play, Chrome, Wifi, WifiOff, CheckCircle2, AlertCircle, Circle, Bot } from 'lucide-react';
 import { agents, SystemState } from '../types';
 
+function timeAgo(dateString: string) {
+  const date = new Date(dateString);
+  const diffInSeconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diffInSeconds < 60) return `Just now`;
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) return `${diffInHours}h ago`;
+  return `${Math.floor(diffInHours / 24)}d ago`;
+}
+
 interface AgentStatusIconProps {
   agentId: string;
   state: SystemState;
@@ -94,7 +105,13 @@ export function AgentGrid({
 
               {/* Body */}
               <h3 className="font-bold text-slate-200 text-sm mb-1.5">{agent.name}</h3>
-              <p className="text-xs text-slate-500 flex-1 mb-5 leading-relaxed">{agent.desc}</p>
+              <p className="text-xs text-slate-500 flex-1 mb-3 leading-relaxed">{agent.desc}</p>
+              
+              {state.lastRunTimes?.[agent.id] && !isCurrentlyRunning && (
+                <p className="text-[10px] text-slate-600 mb-4 font-medium">
+                  Last run: {timeAgo(state.lastRunTimes[agent.id])}
+                </p>
+              )}
 
               {/* Actions */}
               <div className="mt-auto space-y-2">

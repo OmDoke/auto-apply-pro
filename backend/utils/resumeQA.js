@@ -24,6 +24,21 @@ let cachedResumeText = null;
 // Singleton LLM client — instantiated once, reused across all getAIAnswer calls
 let _llmClient = null;
 let _llmModel = null;
+
+const qaLogsPath = path.join(__dirname, '..', 'qa_logs.txt');
+const MAX_LOG_SIZE = 2 * 1024 * 1024; // 2MB
+
+const logQA = (message) => {
+    try {
+        fs.appendFileSync(qaLogsPath, message);
+        const stats = fs.statSync(qaLogsPath);
+        if (stats.size > MAX_LOG_SIZE) {
+            const backupPath = path.join(__dirname, '..', 'qa_logs.bak.txt');
+            if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+            fs.renameSync(qaLogsPath, backupPath);
+        }
+    } catch (e) {}
+};
 const getLLMClient = () => {
     const modelName = process.env.GROQ_MODEL || 'deepseek-r1-distill-llama-70b';
     if (!_llmClient || _llmModel !== modelName) {
@@ -47,10 +62,7 @@ const invokeWithBackoff = async (llm, prompt, maxRetries = 3) => {
             const isRateLimit = err?.status === 429 || (err?.message || '').includes('rate limit');
             if (!isRateLimit) throw err;
             const delay = Math.pow(2, attempt) * 1000;
-            fs.appendFileSync(
-                path.join(__dirname, '..', 'qa_logs.txt'),
-                `[${new Date().toISOString()}] Groq rate limit hit (attempt ${attempt}). Retrying in ${delay}ms...\n`
-            );
+            logQA(`[${new Date().toISOString()}] Groq rate limit hit (attempt ${attempt}). Retrying in ${delay}ms...\n`);
             await new Promise(r => setTimeout(r, delay));
         }
     }
@@ -61,10 +73,7 @@ async function getResumeText() {
 
     const resumePath = path.join(__dirname, '..', 'data', 'resume.pdf');
     if (!fs.existsSync(resumePath)) {
-        fs.appendFileSync(
-            path.join(__dirname, '..', 'qa_logs.txt'),
-            `[${new Date().toISOString()}] Resume PDF not found at: ${resumePath}\n`
-        );
+        logQA(`[${new Date().toISOString()}] Resume PDF not found at: ${resumePath}\n`);
         return '';
     }
 
@@ -73,34 +82,22 @@ async function getResumeText() {
         const data = await pdf(dataBuffer);
 
         if (!data.text || data.text.trim().length === 0) {
-            fs.appendFileSync(
-                path.join(__dirname, '..', 'qa_logs.txt'),
-                `[${new Date().toISOString()}] PDF parsed but text is empty — may be a scanned image with no text layer.\n`
-            );
+            logQA(`[${new Date().toISOString()}] PDF parsed but text is empty — may be a scanned image with no text layer.\n`);
             return '';
         }
 
         cachedResumeText = data.text;
-        fs.appendFileSync(
-            path.join(__dirname, '..', 'qa_logs.txt'),
-            `[${new Date().toISOString()}] Resume loaded successfully (${cachedResumeText.length} chars).\n`
-        );
+        logQA(`[${new Date().toISOString()}] Resume loaded successfully (${cachedResumeText.length} chars).\n`);
         return cachedResumeText;
     } catch (error) {
-        fs.appendFileSync(
-            path.join(__dirname, '..', 'qa_logs.txt'),
-            `[${new Date().toISOString()}] Error parsing resume PDF: ${error.stack || error}\n`
-        );
+        logQA(`[${new Date().toISOString()}] Error parsing resume PDF: ${error.stack || error}\n`);
         return '';
     }
 }
 
 async function getAIAnswer(questionText, context = {}, userData = {}) {
     if (!process.env.GROQ_API_KEY) {
-        fs.appendFileSync(
-            path.join(__dirname, '..', 'qa_logs.txt'),
-            `[${new Date().toISOString()}] No GROQ_API_KEY set.\n`
-        );
+        logQA(`[${new Date().toISOString()}] No GROQ_API_KEY set.\n`);
         return null;
     }
 
@@ -172,10 +169,7 @@ Answer:`);
         answer = answer.split('\n')[0].trim();  // take first line if multi-line
         answer = answer.replace(/\.$/, '').trim(); // strip trailing period
 
-        fs.appendFileSync(
-            path.join(__dirname, '..', 'qa_logs.txt'),
-            `[${new Date().toISOString()}] Q: "${questionText}" -> A: "${answer}"\n`
-        );
+        logQA(`[${new Date().toISOString()}] Q: "${questionText}" -> A: "${answer}"\n`);
 
         if (/i\s+don'?t\s+know/i.test(answer)) {
             return null;
@@ -183,10 +177,7 @@ Answer:`);
 
         return answer || null;
     } catch (error) {
-        fs.appendFileSync(
-            path.join(__dirname, '..', 'qa_logs.txt'),
-            `[${new Date().toISOString()}] Error invoking Groq LLM: ${error}\n`
-        );
+            logQA(`[${new Date().toISOString()}] Error invoking Groq LLM: ${error}\n`);
         return null;
     }
 }

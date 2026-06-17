@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, CheckCircle2, AlertTriangle, BarChart2 } from 'lucide-react';
+import { Activity, CheckCircle2, AlertTriangle, Briefcase } from 'lucide-react';
 
 interface StatCardProps {
   icon: React.ElementType;
@@ -69,8 +69,8 @@ export function StatCards({
         delay={120} 
       />
       <StatCard 
-        icon={BarChart2}      
-        label="Log Events"     
+        icon={Briefcase}      
+        label="Applied Jobs"     
         value={logCount} 
         sub="This session"                                        
         color="bg-violet-500/15 text-violet-400"   

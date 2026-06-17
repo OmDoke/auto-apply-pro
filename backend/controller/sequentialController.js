@@ -10,7 +10,9 @@ const MAX_LOG_ENTRIES = 500;
 let currentState = {
     status: 'Idle',
     currentAgent: null,
-    logs: []
+    logs: [],
+    appliedCount: 0,
+    lastRunTimes: {}
 };
 
 // Use an event emitter format or simply export the state/run sequence
@@ -52,7 +54,14 @@ const runAgent = async (agentName, scriptPath, prefs = {}) => {
 
         childProcess.stdout.on('data', (data) => {
             const lines = data.toString().split('\n').filter(line => line.trim() !== '');
-            lines.forEach(line => addLog(`[${agentName}] ${line}`));
+            lines.forEach(line => {
+                // Intercept applied messages to increment count
+                if (line.includes('✅ Application submitted for:') || line.includes('✓ Applied!')) {
+                    currentState.appliedCount += 1;
+                    setStatus(currentState.status, currentState.currentAgent);
+                }
+                addLog(`[${agentName}] ${line}`);
+            });
         });
 
         childProcess.stderr.on('data', (data) => {
@@ -64,6 +73,8 @@ const runAgent = async (agentName, scriptPath, prefs = {}) => {
             activeProcesses = activeProcesses.filter(p => p !== childProcess);
             if (code === 0) {
                 addLog(`✓ ${agentName} completed successfully.`);
+                currentState.lastRunTimes[agentName] = new Date().toISOString();
+                setStatus(currentState.status, currentState.currentAgent); // Trigger state update
                 resolve();
             } else {
                 addLog(`✗ ${agentName} exited with code ${code}.`);

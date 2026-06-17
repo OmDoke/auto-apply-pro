@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { SystemState, Preferences, SOCKET_URL } from '../types';
 import { apiService } from '../services/api';
 
-export function useAgentSystem() {
+export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: string) => void) {
   const [state, setState] = useState<SystemState>({
     status: 'Idle',
     currentAgent: null,
@@ -37,6 +37,15 @@ export function useAgentSystem() {
         ...prev,
         logs: [...prev.logs, logMessage]
       }));
+
+      // Trigger toasts for important events
+      if (logMessage.includes('✅ Application submitted') || logMessage.includes('✓ Applied!')) {
+        addToast('success', logMessage);
+      } else if (logMessage.includes('[ERROR]') || logMessage.includes('Fatal') || logMessage.includes('✗')) {
+        addToast('error', logMessage);
+      } else if (logMessage.includes('Starting Single Agent') || logMessage.includes('Starting Universal Job Agent')) {
+        addToast('info', logMessage);
+      }
     });
 
     return () => {

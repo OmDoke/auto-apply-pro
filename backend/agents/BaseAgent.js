@@ -18,6 +18,7 @@ class BaseAgent {
         this.agentName = agentName;
         this.userDataDir = path.join(__dirname, '..', 'data', 'puppeteer', userDataDirFolder);
         this.failedJobsPath = path.join(__dirname, '..', 'data', 'failed_jobs.json');
+        this.appliedJobsPath = path.join(__dirname, '..', 'data', 'applied_jobs.json');
         
         // Ensure puppeteer data dir exists
         if (!fs.existsSync(this.userDataDir)) {
@@ -72,6 +73,33 @@ class BaseAgent {
             }
         } catch (e) {
             console.log(`[${this.agentName}] Could not save failed jobs:`, e.message);
+        }
+    }
+
+    isJobApplied(title) {
+        try {
+            if (fs.existsSync(this.appliedJobsPath)) {
+                const existing = JSON.parse(fs.readFileSync(this.appliedJobsPath, 'utf8'));
+                // Use case-insensitive matching for titles
+                return existing.some(j => j.title.toLowerCase() === title.toLowerCase());
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    recordJobApplied(title, url) {
+        try {
+            let existing = [];
+            if (fs.existsSync(this.appliedJobsPath)) {
+                existing = JSON.parse(fs.readFileSync(this.appliedJobsPath, 'utf8'));
+            }
+            // Avoid duplicates
+            if (!existing.some(j => j.title.toLowerCase() === title.toLowerCase() || (j.url && url && j.url === url))) {
+                existing.push({ title, url, appliedAt: new Date().toISOString() });
+                fs.writeFileSync(this.appliedJobsPath, JSON.stringify(existing, null, 2));
+            }
+        } catch (e) {
+            console.log(`[${this.agentName}] Could not record applied job:`, e.message);
         }
     }
 

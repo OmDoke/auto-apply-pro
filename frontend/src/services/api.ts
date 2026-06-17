@@ -37,6 +37,15 @@ export const apiService = {
     }
   },
 
+  openUrl: async (url: string): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const res = await axios.post(`${API_BASE}/open-url`, { url });
+      return res.data;
+    } catch (e: any) {
+      return { ok: false, message: e?.response?.data?.message || 'Failed to open URL' };
+    }
+  },
+
   getChromeStatus: async (): Promise<boolean> => {
     try {
       const res = await axios.get(`${API_BASE}/chrome-status`);
@@ -61,6 +70,24 @@ export const apiService = {
       return res.data;
     } catch (e: any) {
       return { ok: false, message: e?.response?.data?.message || 'Failed to update profile' };
+    }
+  },
+
+  getAnswers: async (): Promise<any> => {
+    try {
+      const res = await axios.get(`${API_BASE}/answers`);
+      return res.data;
+    } catch {
+      return null;
+    }
+  },
+
+  updateAnswers: async (answers: any): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const res = await axios.post(`${API_BASE}/answers`, answers);
+      return res.data;
+    } catch (e: any) {
+      return { ok: false, message: e?.response?.data?.message || 'Failed to update answers' };
     }
   },
 };

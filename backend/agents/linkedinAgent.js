@@ -40,6 +40,33 @@ const saveFailedJobs = (failedJobs) => {
     }
 };
 
+const appliedJobsPath = path.join(__dirname, '..', 'data', 'applied_jobs.json');
+
+const isJobApplied = (title) => {
+    try {
+        if (fs.existsSync(appliedJobsPath)) {
+            const existing = JSON.parse(fs.readFileSync(appliedJobsPath, 'utf8'));
+            return existing.some(j => j.title.toLowerCase() === title.toLowerCase());
+        }
+    } catch (e) {}
+    return false;
+};
+
+const recordAppliedJob = (title, url) => {
+    try {
+        let existing = [];
+        if (fs.existsSync(appliedJobsPath)) {
+            existing = JSON.parse(fs.readFileSync(appliedJobsPath, 'utf8'));
+        }
+        if (!existing.some(j => j.title.toLowerCase() === title.toLowerCase() || (j.url && url && j.url === url))) {
+            existing.push({ title, url, appliedAt: new Date().toISOString() });
+            fs.writeFileSync(appliedJobsPath, JSON.stringify(existing, null, 2));
+        }
+    } catch (e) {
+        console.log('Could not save applied_jobs.json:', e.message);
+    }
+};
+
 // Helper: close the Easy Apply modal by clicking Dismiss, then Discard if needed
 const discardModal = async (page) => {
     try {
@@ -731,8 +758,8 @@ const fillFormFields = async (page, answers) => {
 // ---------------------------------------------------------------------------
 // Helper: try selecting resume by name, then fall back to file upload
 // ---------------------------------------------------------------------------
-const handleResumeStep = async (page) => {
-    const targetResume = process.env.RESUME_NAME || presetAnswers['resume name'] || '';
+const handleResumeStep = async (page, answers = {}) => {
+    const targetResume = process.env.RESUME_NAME || answers['resume name'] || '';
     if (!targetResume) {
         console.log('  No resume name configured. Skipping named selection.');
     } else {
@@ -860,7 +887,7 @@ const recoverLinkedInFormErrors = async (page, answers) => {
 };
 
 
-const attemptApply = async (page, jobInfo, attemptNum) => {
+const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
     console.log(`  [Attempt ${attemptNum}/2] Opening Easy Apply for: ${jobInfo.title}`);
 
     const applyBtn = await page.$('.jobs-apply-button');
@@ -900,10 +927,10 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
         }
 
         // A) Handle resume step
-        await handleResumeStep(page);
+        await handleResumeStep(page, answers);
 
         // B) Fill all form fields — real Puppeteer interactions
-        const fillResult = await fillFormFields(page, presetAnswers);
+        const fillResult = await fillFormFields(page, answers);
         if (fillResult === 'SKIP_JOB') {
             await discardModal(page);
             return 'skipped';
@@ -963,9 +990,9 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
                 const msgs = await Promise.all(reviewErrors.map(e => page.evaluate(el => el.innerText.trim(), e)));
                 console.log(`  ❌ Validation errors after Review: ${msgs.join(' | ')}`);
                 // Step 1: Targeted numeric/type-mismatch recovery
-                await recoverLinkedInFormErrors(page, presetAnswers);
+                await recoverLinkedInFormErrors(page, answers);
                 // Step 2: Full re-fill pass for any remaining blanks
-                await fillFormFields(page, presetAnswers);
+                await fillFormFields(page, answers);
                 await new Promise(r => setTimeout(r, 800));
                 const stillErrors = await page.$$('.artdeco-inline-feedback--error');
                 if (stillErrors.length > 0) {
@@ -988,9 +1015,9 @@ const attemptApply = async (page, jobInfo, attemptNum) => {
                 const msgs = await Promise.all(errors.map(e => page.evaluate(el => el.innerText.trim(), e)));
                 console.log(`  ❌ Validation errors on step: ${msgs.join(' | ')}`);
                 // Step 1: Targeted numeric/type-mismatch recovery
-                await recoverLinkedInFormErrors(page, presetAnswers);
+                await recoverLinkedInFormErrors(page, answers);
                 // Step 2: Full re-fill pass for any remaining blanks
-                await fillFormFields(page, presetAnswers);
+                await fillFormFields(page, answers);
                 await new Promise(r => setTimeout(r, 800));
                 const stillErrors = await page.$$('.artdeco-inline-feedback--error');
                 if (stillErrors.length > 0) {
@@ -1162,6 +1189,11 @@ const run = async () => {
                         jobInfo = { ...jobInfo, ...fetchedInfo };
                         console.log(`  Job: "${jobInfo.title}" at ${jobInfo.company}`);
 
+                        if (isJobApplied(jobInfo.title)) {
+                            console.log(`  Skipping already applied job (from previous session): ${jobInfo.title}`);
+                            continue;
+                        }
+
                         // Skip restricted companies
                         const restrictedCompanies = ['ht media', 'ht media labs', 'ht media lbas', 'ht labs', 'ht media group'];
                         const normalizedCompany = jobInfo.company.toLowerCase().trim();
@@ -1180,11 +1212,12 @@ const run = async () => {
                                 await new Promise(r => setTimeout(r, 2000));
                             }
 
-                            result = await attemptApply(page, jobInfo, attempt);
+                            result = await attemptApply(page, jobInfo, attempt, presetAnswers);
 
                             if (result === 'submitted') {
                                 jobsApplied++;
                                 console.log(`  ✓ Applied! Total so far: ${jobsApplied}`);
+                                recordAppliedJob(jobInfo.title, jobInfo.url);
                                 break;
                             }
 

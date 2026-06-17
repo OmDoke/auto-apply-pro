@@ -304,17 +304,24 @@ class IndeedAgent extends BaseAgent {
                     if (labelText) results.push({ aaidx, type: 'select', label: labelText, options });
                 });
 
-                // Radio / fieldset groups
+                // Radio / Checkbox / fieldset groups
                 document.querySelectorAll('fieldset').forEach((fs) => {
                     if (fs.offsetParent === null) return;
                     if (fs.closest('header, nav, #gnav-main-container, #gnav-header-container')) return;
                     const legend = fs.querySelector('legend');
                     const radios = fs.querySelectorAll('input[type="radio"]');
-                    const checked = fs.querySelector('input[type="radio"]:checked');
-                    if (legend && radios.length > 0 && !checked) {
+                    const checkboxes = fs.querySelectorAll('input[type="checkbox"]');
+                    const checkedRadio = fs.querySelector('input[type="radio"]:checked');
+
+                    if (legend && radios.length > 0 && !checkedRadio) {
                         const opts = Array.from(fs.querySelectorAll('label')).map(l => l.innerText.trim());
                         const aaidx = fs.getAttribute('data-aaidx');
                         results.push({ aaidx, type: 'radio', label: legend.innerText.trim(), options: opts });
+                    } else if (legend && checkboxes.length > 0) {
+                        // For checkboxes, we want to evaluate each one
+                        const opts = Array.from(fs.querySelectorAll('label')).map(l => l.innerText.trim());
+                        const aaidx = fs.getAttribute('data-aaidx');
+                        results.push({ aaidx, type: 'checkbox', label: legend.innerText.trim(), options: opts });
                     }
                 });
 
@@ -392,6 +399,23 @@ class IndeedAgent extends BaseAgent {
                         const labels = Array.from(el.querySelectorAll('label'));
                         const match = labels.find(l => l.innerText.toLowerCase().includes(answer.toLowerCase()));
                         if (match) match.click();
+                    } else if (f.type === 'checkbox') {
+                        const labels = Array.from(el.querySelectorAll('label'));
+                        const ansLower = answer.toLowerCase();
+                        if (ansLower === 'yes' || ansLower === 'true' || ansLower === '1') {
+                            // Single checkbox or "check all" - we assume the answer matches if it's truthy
+                            // For multi-select we might need better logic, but this handles "I confirm" checkboxes
+                            for (const l of labels) {
+                                const input = el.querySelector(`input#${l.getAttribute('for')}`);
+                                if (input && !input.checked) l.click();
+                            }
+                        } else {
+                            const match = labels.find(l => l.innerText.toLowerCase().includes(ansLower) || ansLower.includes(l.innerText.toLowerCase()));
+                            if (match) {
+                                const input = el.querySelector(`input#${match.getAttribute('for')}`);
+                                if (input && !input.checked) match.click();
+                            }
+                        }
                     }
                 }, { f, answer });
             }
@@ -769,12 +793,41 @@ class IndeedAgent extends BaseAgent {
 
         if (submitted) {
             console.log(`[${this.agentName}] ✅ Application submitted for: ${title}`);
+            this.recordJobApplied(title, applyUrl);
             return true;
         } else {
             console.log(`[${this.agentName}] ❌ Application failed for: ${title}`);
             this.failedJobs.push({ title, url: this.page.url() });
             return false;
         }
+    }
+
+    // ─── Cloudflare Detection ───────────────────────────────────────────────────
+
+    async checkCloudflare() {
+        const isCloudflare = await this.page.evaluate(() => {
+            const title = document.title.toLowerCase();
+            const body = document.body ? document.body.innerText.toLowerCase() : '';
+            return title.includes('just a moment') || body.includes('cloudflare') || !!document.querySelector('#cf-wrapper');
+        }).catch(() => false);
+
+        if (isCloudflare) {
+            console.log(`[${this.agentName}] 🛑 Cloudflare challenge detected! Waiting up to 60s for manual intervention...`);
+            for (let i = 0; i < 12; i++) {
+                await new Promise(r => setTimeout(r, 5000));
+                const stillBlocked = await this.page.evaluate(() => {
+                    const title = document.title.toLowerCase();
+                    return title.includes('just a moment') || !!document.querySelector('#cf-wrapper');
+                }).catch(() => false);
+                if (!stillBlocked) {
+                    console.log(`[${this.agentName}] ✅ Cloudflare challenge passed!`);
+                    return false;
+                }
+            }
+            console.log(`[${this.agentName}] ❌ Cloudflare challenge persists after 60s. Might need to restart or solve manually.`);
+            return true;
+        }
+        return false;
     }
 
     // ─── Main Run Loop ───────────────────────────────────────────────────────────
@@ -815,7 +868,13 @@ class IndeedAgent extends BaseAgent {
                 await this.page.goto('https://in.indeed.com/?from=gnav-homepage', {
                     waitUntil: 'networkidle2', timeout: 30000
                 });
-                await new Promise(r => setTimeout(r, 10000)); // wait for home feed to load
+                
+                const blocked = await this.checkCloudflare();
+                if (blocked) {
+                    console.log(`[${this.agentName}] Cannot proceed past Cloudflare on home feed.`);
+                } else {
+                    await new Promise(r => setTimeout(r, 10000)); // wait for home feed to load
+                }
             } catch (e) {
                 console.log(`[${this.agentName}] Home page load issue, continuing...`);
             }
@@ -833,8 +892,8 @@ class IndeedAgent extends BaseAgent {
                         .catch(() => null);
                     if (titleEl) {
                         const title = await this.page.evaluate(el => el.innerText.trim(), titleEl);
-                        if (processedJobTitles.has(title)) {
-                            console.log(`[${this.agentName}] Skipping already processed job: ${title}`);
+                        if (processedJobTitles.has(title) || this.isJobApplied(title)) {
+                            console.log(`[${this.agentName}] Skipping already processed/applied job: ${title}`);
                             continue;
                         }
                         processedJobTitles.add(title);

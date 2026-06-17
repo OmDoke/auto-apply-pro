@@ -138,7 +138,7 @@ export default function AgentDashboard({
             completedCount={completedCount}
             totalActive={totalActive}
             failedCount={failedCount}
-            logCount={state.logs.length}
+            logCount={state.appliedCount || 0}
             isRunning={isRunning}
           />
 

@@ -204,15 +204,29 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
             const pattern = new RegExp(`\\b${escaped}\\b`);
             if (pattern.test(normalizedQ)) {
                 foundSkill = true;
+                // CRITICAL FIX: use word-boundary match on the KEY too, not just includes().
+                // This prevents 'git' from matching 'github', 'node' from matching 'nodejs', etc.
+                const skillPattern = new RegExp(`^${escaped}$|\\b${escaped}\\b`);
                 const skillKey = Object.keys(data).find(k => {
                     const normK = normalizeText(k);
+                    // For very short tokens (<=2 chars), use strict equality or word boundary
                     if (skill.length <= 2) {
-                        return normK === skill || new RegExp(`\\b${skill}\\b`).test(normK);
+                        return normK === skill || new RegExp(`\\b${escaped}\\b`).test(normK);
                     }
-                    return normK.includes(skill);
+                    // For longer tokens: use word boundary, NOT includes() — avoids git→github
+                    return skillPattern.test(normK);
                 });
                 if (skillKey !== undefined && data[skillKey] !== undefined) {
-                    answerVal = String(data[skillKey]);
+                    const candidate = String(data[skillKey]);
+                    // SAFETY: only use it if it's a number, not a URL / text
+                    const isNumeric = /^\d+(\.\d+)?$/.test(candidate.trim());
+                    if (isNumeric) {
+                        answerVal = candidate;
+                    } else {
+                        // Value is a URL or text — fall back to general experience
+                        const generalExp = data['experience'] ?? data['years'] ?? null;
+                        answerVal = generalExp !== null ? String(generalExp) : '1';
+                    }
                 } else {
                     const generalExp = data['experience'] ?? data['years'] ?? null;
                     answerVal = generalExp !== null ? String(generalExp) : '1';
@@ -398,6 +412,42 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
     // ---------- Country ----------
     if (normalizedQ.includes('country') || normalizedQ.includes('nation')) {
         return String(data['country'] ?? 'India');
+    }
+
+    // ---------- 10th / SSC percentage (must come BEFORE generic education check) ----------
+    if (
+        normalizedQ.includes('10th') ||
+        normalizedQ.includes('ssc') ||
+        normalizedQ.includes('class 10') ||
+        normalizedQ.includes('tenth') ||
+        (normalizedQ.includes('10') && normalizedQ.includes('percentage') && !normalizedQ.includes('12') && !normalizedQ.includes('btech'))
+    ) {
+        return String(data['10th percentage'] ?? data['10th marks'] ?? data['ssc percentage'] ?? '89.20');
+    }
+
+    // ---------- 12th / HSC percentage (must come BEFORE generic education check) ----------
+    if (
+        normalizedQ.includes('12th') ||
+        normalizedQ.includes('hsc') ||
+        normalizedQ.includes('class 12') ||
+        normalizedQ.includes('twelfth') ||
+        (normalizedQ.includes('12') && normalizedQ.includes('percentage') && !normalizedQ.includes('btech'))
+    ) {
+        return String(data['12th percentage'] ?? data['12th marks'] ?? data['hsc percentage'] ?? '73.54');
+    }
+
+    // ---------- BTech / graduation CGPA / GPA ----------
+    if (
+        normalizedQ.includes('cgpa') ||
+        normalizedQ.includes('gpa') ||
+        (normalizedQ.includes('btech') && normalizedQ.includes('percentage')) ||
+        (normalizedQ.includes('b tech') && normalizedQ.includes('percentage')) ||
+        (normalizedQ.includes('graduation') && normalizedQ.includes('percentage'))
+    ) {
+        if (normalizedQ.includes('cgpa') || normalizedQ.includes('gpa')) {
+            return String(data['cgpa'] ?? data['gpa'] ?? '7.65');
+        }
+        return String(data['btech percentage'] ?? data['percentage'] ?? '70');
     }
 
     // ---------- Education / Degree ----------
@@ -601,14 +651,22 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         return String(data['shift'] ?? 'Yes');
     }
 
+    // ---------- Unpaid internship (must come before generic intern handler) ----------
+    if (
+        normalizedQ.includes('unpaid') ||
+        (normalizedQ.includes('intern') && normalizedQ.includes('comfort'))
+    ) {
+        return String(data['unpaid internships'] ?? data['unpaid internship'] ?? 'No');
+    }
+
     // ---------- Internship / fresher ----------
     if (
         normalizedQ.includes('intern') ||
         normalizedQ.includes('fresher') ||
         normalizedQ.includes('fresh graduate')
     ) {
-        // If this is a Yes/No question (e.g. "Are you comfortable with a 3-month unpaid internship?"),
-        // don't return an experience number — fall through to AI/default.
+        // If this is a Yes/No question (e.g. "Are you an intern?"),
+        // return Yes (we are applying as an intern/fresher candidate)
         if (context.options && context.options.length > 0) {
             const lowerOpts = context.options.map(o => o.toLowerCase());
             if (lowerOpts.includes('yes') && lowerOpts.includes('no')) {
