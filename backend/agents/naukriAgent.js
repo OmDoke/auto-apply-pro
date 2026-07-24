@@ -177,9 +177,13 @@ const run = async () => {
                             try {
                                 console.log('Searching for Apply button...');
                                 const applyBtn = await newPage.evaluateHandle(() => {
-                                    const elements = Array.from(document.querySelectorAll('button, a, div[role="button"], span.apply-message'));
+                                    const byId = document.getElementById('apply-button');
+                                    if (byId && ((byId.innerText || '').toLowerCase().includes('apply') || (byId.value || '').toLowerCase().includes('apply'))) {
+                                        return byId;
+                                    }
+                                    const elements = Array.from(document.querySelectorAll('button, a, div[role="button"], span.apply-message, input[type="button"]'));
                                     return elements.find(el => {
-                                        const text = el.innerText ? el.innerText.toLowerCase().trim() : '';
+                                        const text = (el.innerText || el.value || '').toLowerCase().trim();
                                         return text === 'apply' || text === 'apply now' || text.includes('apply on company website');
                                     });
                                 });
@@ -189,6 +193,179 @@ const run = async () => {
                                     await applyBtn.click();
                                     console.log('Successfully clicked Apply!');
                                     await new Promise(r => setTimeout(r, 4000));
+
+                                    // Handle chatbot / questionnaire / side panel / modals FIRST
+                                    const hasQuestions = await newPage.$('.chatbot, .bot-container, .layer-wrap, .drawer-wrapper, .right-drawer, .apply-form, [role="dialog"], .modal, .dialog-container');
+                                    if (hasQuestions) {
+                                        console.log('Additional questions / side panel detected. Attempting to answer...');
+                                        const MAX_CHAT_STEPS = 15;
+                                        let chatStep = 0;
+
+                                        while (chatStep < MAX_CHAT_STEPS) {
+                                            chatStep++;
+                                            // await new Promise(r => setTimeout(r, 1500));
+
+                                            // Extract all unanswered inputs with their labels
+                                            const qaPairs = await newPage.evaluate(() => {
+                                                const pairs = [];
+                                                // Handle standard forms in side panels
+                                                const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]):not([type="file"]), textarea, select'));
+                                                
+                                                // Group radios/checkboxes by name so we only count them as one question
+                                                const processedNames = new Set();
+
+                                                inputs.forEach((input, index) => {
+                                                    const type = input.type ? input.type.toLowerCase() : 'text';
+                                                    
+                                                    if (type === 'radio' || type === 'checkbox') {
+                                                        const name = input.name || input.id;
+                                                        if (name && processedNames.has(name)) return;
+                                                        if (name) processedNames.add(name);
+                                                    } else {
+                                                        // Skip already filled text inputs
+                                                        if (input.value && input.value.trim() !== '') return;
+                                                    }
+                                                    
+                                                    // Find nearest label
+                                                    let label = '';
+                                                    const container = input.closest('.form-group, .question-container, .input-container, div[class*="question"], li, div');
+                                                    if (container) {
+                                                        const labelEl = container.querySelector('label, .question-text, span.label, span[class*="label"], div[class*="label"], .caption');
+                                                        if (labelEl) label = labelEl.innerText.trim();
+                                                    }
+                                                    if (!label) {
+                                                        const prev = input.previousElementSibling;
+                                                        if (prev && (prev.tagName === 'LABEL' || prev.tagName === 'SPAN' || prev.tagName === 'DIV')) {
+                                                            label = prev.innerText.trim();
+                                                        }
+                                                    }
+                                                    if (!label && input.placeholder) label = input.placeholder;
+                                                    if (!label) label = 'Question ' + index;
+
+                                                    let options = [];
+                                                    if (type === 'radio' || type === 'checkbox') {
+                                                        // For radios/checkboxes, options are the labels of all inputs with the same name
+                                                        const name = input.name || input.id;
+                                                        const relatedInputs = Array.from(document.querySelectorAll(`input[name="${name}"], input[id="${name}"]`));
+                                                        options = relatedInputs.map(r => {
+                                                            const l = document.querySelector(`label[for="${r.id}"]`) || r.closest('label');
+                                                            return l ? l.innerText.trim() : r.value;
+                                                        });
+                                                    } else if (input.tagName.toLowerCase() === 'select') {
+                                                        options = Array.from(input.options).map(o => o.text.trim());
+                                                    }
+
+                                                    pairs.push({
+                                                        question: label,
+                                                        inputType: input.tagName.toLowerCase() === 'select' ? 'select' : type,
+                                                        inputId: input.id || input.name || index.toString(),
+                                                        isSelect: input.tagName.toLowerCase() === 'select',
+                                                        options: options,
+                                                        rawIndex: index
+                                                    });
+                                                });
+                                                return pairs;
+                                            });
+
+                                            if (qaPairs.length > 0) {
+                                                console.log(`Found ${qaPairs.length} unanswered questions in form.`);
+                                                for (let qa of qaPairs) {
+                                                    const bestMatch = await getAnswer(qa.question, presetAnswers, { type: qa.inputType, options: qa.options, source: 'naukri' });
+                                                    const finalAnswer = bestMatch || '0';
+                                                    console.log(`  Q: "${qa.question}" -> A: "${finalAnswer}"`);
+                                                    
+                                                    // Inject back into the page
+                                                    await newPage.evaluate((qa, finalAnswer) => {
+                                                        const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]):not([type="file"]), textarea, select'));
+                                                        const target = inputs[qa.rawIndex];
+                                                        if (!target) return;
+                                                        
+                                                        const type = target.type ? target.type.toLowerCase() : 'text';
+                                                        if (type === 'radio' || type === 'checkbox') {
+                                                            const name = target.name || target.id;
+                                                            const relatedInputs = Array.from(document.querySelectorAll(`input[name="${name}"], input[id="${name}"]`));
+                                                            const toClick = relatedInputs.find(r => {
+                                                                const l = document.querySelector(`label[for="${r.id}"]`) || r.closest('label');
+                                                                const labelText = l ? l.innerText.trim().toLowerCase() : r.value.toLowerCase();
+                                                                return labelText === finalAnswer.toLowerCase() || labelText.includes(finalAnswer.toLowerCase()) || finalAnswer.toLowerCase().includes(labelText);
+                                                            });
+                                                            if (toClick) toClick.click();
+                                                            else target.click(); // fallback to first option
+                                                        } else {
+                                                            const tag = target.tagName.toLowerCase();
+                                                            let setter = null;
+                                                            if (tag === 'textarea') setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                                                            else if (tag === 'select') setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+                                                            else setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                                                            
+                                                            if (setter) setter.call(target, finalAnswer);
+                                                            else target.value = finalAnswer;
+                                                            
+                                                            target.dispatchEvent(new Event('input', {bubbles: true}));
+                                                            target.dispatchEvent(new Event('change', {bubbles: true}));
+                                                            target.dispatchEvent(new Event('blur', {bubbles: true}));
+                                                        }
+                                                    }, qa, finalAnswer);
+                                                }
+                                                
+                                                // Click save/submit/next
+                                                await newPage.evaluate(() => {
+                                                    const btns = Array.from(document.querySelectorAll('button'));
+                                                    const submitBtn = btns.find(b => {
+                                                        const t = (b.innerText||'').toLowerCase().trim();
+                                                        return t === 'save' || t === 'submit' || t === 'send' || t === 'next' || t === 'save & next';
+                                                    });
+                                                    if (submitBtn) submitBtn.click();
+                                                });
+                                                
+                                            } else {
+                                                // Fallback to old Chatbot logic for sequential bubble questions
+                                                const questionText = await newPage.evaluate(() => {
+                                                    const bubbles = Array.from(document.querySelectorAll('.msg-content, .botMsg'));
+                                                    const last = bubbles[bubbles.length - 1];
+                                                    return last ? (last.innerText || '') : '';
+                                                });
+
+                                                if (!questionText.trim()) break;
+                                                console.log(`  Chat Q${chatStep}: "${questionText.trim()}"`);
+
+                                                const bestMatch = await getAnswer(questionText, presetAnswers, { source: 'naukri' }) || '0';
+                                                console.log(`  Chat A${chatStep}: "${bestMatch}"`);
+
+                                                await newPage.evaluate((answer) => {
+                                                    const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]):not([type="file"]), textarea'));
+                                                    const emptyInput = inputs.find(inp => !inp.value);
+                                                    if (emptyInput) {
+                                                        const tag = emptyInput.tagName.toLowerCase();
+                                                        let setter = null;
+                                                        if (tag === 'textarea') setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                                                        else setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                                                        
+                                                        if (setter) setter.call(emptyInput, answer);
+                                                        else emptyInput.value = answer;
+                                                        
+                                                        emptyInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                                        emptyInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                                        emptyInput.dispatchEvent(new Event('blur', { bubbles: true }));
+                                                    }
+                                                    const submitBtns = Array.from(document.querySelectorAll('button'));
+                                                    for (const btn of submitBtns) {
+                                                        const t = btn.innerText ? btn.innerText.toLowerCase() : '';
+                                                        if (t.includes('save') || t.includes('submit') || t.includes('send') || t.includes('next')) {
+                                                            btn.click();
+                                                            break;
+                                                        }
+                                                    }
+                                                }, bestMatch);
+                                            }
+
+                                            // await new Promise(r => setTimeout(r, 1500));
+
+                                            const stillOpen = await newPage.$('.chatbot, .bot-container, .layer-wrap, .drawer-wrapper, .right-drawer, .apply-form, [role="dialog"], .modal, .dialog-container')
+                                                .then(el => !!el).catch(() => false);
+                                            if (!stillOpen) break;
+                                        }
+                                    }
 
                                     // Verify application was accepted before counting it
                                     const applyConfirmed = await newPage.evaluate(() => {
@@ -207,6 +384,24 @@ const run = async () => {
                                         console.log(`  ✓ Application confirmed. Total so far: ${jobsApplied}`);
                                     } else {
                                         console.log('  ! Apply clicked but no confirmation found — not counting as applied.');
+                                        const path = require('path');
+                                        const fs = require('fs');
+                                        const ts = Date.now();
+                                        const ssDir = path.join(__dirname, '..', 'data', 'screenshots');
+                                        if (!fs.existsSync(ssDir)) {
+                                            fs.mkdirSync(ssDir, { recursive: true });
+                                        }
+                                        const ssPath = path.join(ssDir, `naukri_sidepanel_${ts}.png`);
+                                        await newPage.screenshot({ path: ssPath, fullPage: true }).catch(() => {});
+                                        
+                                        // Also dump HTML for debugging
+                                        const htmlPath = path.join(ssDir, `naukri_sidepanel_${ts}.html`);
+                                        try {
+                                            const html = await newPage.content();
+                                            fs.writeFileSync(htmlPath, html);
+                                        } catch (e) {}
+                                        
+                                        console.log(`Saved screenshot and HTML dump to ${ssDir}`);
                                         failedJobs.push({
                                             title: jobInfo.title,
                                             company: jobInfo.company,
@@ -214,70 +409,28 @@ const run = async () => {
                                             reason: 'Apply clicked but no success confirmation detected'
                                         });
                                     }
-
-                                    // Handle chatbot / questionnaire — iterative: wait for each question
-                                    const hasQuestions = await newPage.$('.chatbot, .bot-container, .layer-wrap');
-                                    if (hasQuestions) {
-                                        console.log('Additional questions detected. Attempting to answer...');
-                                        const MAX_CHAT_STEPS = 15;
-                                        let chatStep = 0;
-
-                                        while (chatStep < MAX_CHAT_STEPS) {
-                                            chatStep++;
-                                            try {
-                                                await newPage.waitForFunction(
-                                                    () => document.querySelectorAll('.msg-content, .botMsg').length > 0,
-                                                    { timeout: 5000 }
-                                                );
-                                            } catch (_) { break; }
-
-                                            const questionText = await newPage.evaluate(() => {
-                                                const bubbles = Array.from(document.querySelectorAll('.msg-content, .botMsg'));
-                                                const last = bubbles[bubbles.length - 1];
-                                                return last ? (last.innerText || '') : '';
-                                            });
-
-                                            if (!questionText.trim()) break;
-                                            console.log(`  Chat Q${chatStep}: "${questionText.trim()}"`);
-
-                                            const bestMatch = await getAnswer(questionText, presetAnswers) || '0';
-                                            console.log(`  Chat A${chatStep}: "${bestMatch}"`);
-
-                                            await newPage.evaluate((answer) => {
-                                                const inputs = Array.from(document.querySelectorAll(
-                                                    'input[type="text"], input[type="number"], textarea'
-                                                ));
-                                                const emptyInput = inputs.find(inp => !inp.value);
-                                                if (emptyInput) {
-                                                    emptyInput.value = answer;
-                                                    emptyInput.dispatchEvent(new Event('input', { bubbles: true }));
-                                                }
-                                                const submitBtns = Array.from(document.querySelectorAll('button'));
-                                                for (const btn of submitBtns) {
-                                                    const t = btn.innerText ? btn.innerText.toLowerCase() : '';
-                                                    if (t.includes('save') || t.includes('submit') || t.includes('send') || t.includes('next')) {
-                                                        btn.click();
-                                                        break;
-                                                    }
-                                                }
-                                            }, bestMatch);
-
-                                            await new Promise(r => setTimeout(r, 1500));
-
-                                            const chatClosed = await newPage.$('.chatbot, .bot-container, .layer-wrap')
-                                                .then(el => !el).catch(() => true);
-                                            if (chatClosed) break;
-                                        }
-                                    }
                                 } else {
                                     const alreadyApplied = await newPage.evaluate(() => {
-                                        const text = document.body.innerText.toLowerCase();
-                                        return text.includes('already applied') || text.includes('applied on');
+                                        const buttons = Array.from(document.querySelectorAll('button, a, div[role="button"], span.apply-message'));
+                                        return buttons.some(el => {
+                                            const text = el.innerText ? el.innerText.toLowerCase().trim() : '';
+                                            return text === 'applied' || text.includes('already applied') || text.includes('applied on');
+                                        });
                                     });
                                     if (alreadyApplied) {
                                         console.log('Notice: Already applied to this job.');
                                     } else {
                                         console.log('Notice: Could not find an Apply button inside the new tab.');
+                                        const path = require('path');
+                                        const fs = require('fs');
+                                        const ts = Date.now();
+                                        const ssDir = path.join(__dirname, '..', 'data', 'screenshots');
+                                        if (!fs.existsSync(ssDir)) {
+                                            fs.mkdirSync(ssDir, { recursive: true });
+                                        }
+                                        const ssPath = path.join(ssDir, `naukri_noapply_${ts}.png`);
+                                        await newPage.screenshot({ path: ssPath, fullPage: true }).catch(() => {});
+                                        console.log(`Saved screenshot to ${ssPath}`);
                                         failedJobs.push({
                                             title: jobInfo.title,
                                             company: jobInfo.company,

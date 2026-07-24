@@ -20,7 +20,7 @@ const loadAnswers = () => {
 };
 
 // Resume path from backend/data
-const resumePath = path.join(__dirname, '..', 'data', 'resume.pdf');
+const resumePath = path.join(__dirname, '..', 'data', 'onkar_resume.pdf');
 
 // Path to persist failed jobs
 const failedJobsPath = path.join(__dirname, '..', 'data', 'failed_jobs.json');
@@ -72,7 +72,7 @@ const discardModal = async (page) => {
     try {
         const dismissBtn = await page.$('button[aria-label="Dismiss"]');
         if (dismissBtn) await dismissBtn.click();
-        await new Promise(r => setTimeout(r, 1000));
+        // await new Promise(r => setTimeout(r, 50));
         // Confirm discard if prompted
         await page.evaluate(() => {
             const btns = Array.from(document.querySelectorAll('button'));
@@ -83,7 +83,7 @@ const discardModal = async (page) => {
                 }
             }
         });
-        await new Promise(r => setTimeout(r, 800));
+        // await new Promise(r => setTimeout(r, 50));
     } catch (e) {
         // ignore
     }
@@ -100,8 +100,8 @@ const typeIntoInput = async (page, elementHandle, value) => {
     await page.keyboard.press('a');
     await page.keyboard.up('Control');
     await page.keyboard.press('Delete');
-    await new Promise(r => setTimeout(r, 500));
-    await elementHandle.type(String(value), { delay: 80 });
+    // await new Promise(r => setTimeout(r, 50));
+    await elementHandle.type(String(value));
 
     // Verify what's in the field
     const actual = await page.evaluate(el => el.value, elementHandle);
@@ -112,8 +112,8 @@ const typeIntoInput = async (page, elementHandle, value) => {
         await page.keyboard.press('a');
         await page.keyboard.up('Control');
         await page.keyboard.press('Delete');
-        await new Promise(r => setTimeout(r, 500));
-        await elementHandle.type(String(value), { delay: 100 });
+        // await new Promise(r => setTimeout(r, 50));
+        await elementHandle.type(String(value));
     }
 };
 
@@ -124,7 +124,7 @@ const typeIntoInput = async (page, elementHandle, value) => {
 const clickDropdownOption = async (page, triggerHandle, optionText) => {
     try {
         await triggerHandle.click();
-        await new Promise(r => setTimeout(r, 1000)); // wait for options to populate
+        // await new Promise(r => setTimeout(r, 50)); // wait for options to populate
 
         // Try to find and click the option in the newly opened listbox
         const clicked = await page.evaluate((text) => {
@@ -144,7 +144,7 @@ const clickDropdownOption = async (page, triggerHandle, optionText) => {
             return false;
         }, optionText);
 
-        await new Promise(r => setTimeout(r, 500));
+        // await new Promise(r => setTimeout(r, 50));
         return clicked;
     } catch (e) {
         return false;
@@ -167,10 +167,10 @@ const handleCombobox = async (page, inputHandle, textValue) => {
         await page.keyboard.press('a');
         await page.keyboard.up('Control');
         await page.keyboard.press('Delete');
-        await new Promise(r => setTimeout(r, 400));
+        // await new Promise(r => setTimeout(r, 50));
 
         // Step 2: Type slowly to trigger LinkedIn's typeahead API
-        await inputHandle.type(valString, { delay: 120 });
+        await inputHandle.type(valString);
 
         // Step 3: Wait for autocomplete dropdown to appear (up to 3 seconds)
         const dropdownSelectors = [
@@ -195,7 +195,7 @@ const handleCombobox = async (page, inputHandle, textValue) => {
 
         let dropdownFound = false;
         for (let wait = 0; wait < 6; wait++) {
-            await new Promise(r => setTimeout(r, 500));
+            // await new Promise(r => setTimeout(r, 50));
             dropdownFound = await page.evaluate((selectors) => {
                 for (const sel of selectors) {
                     const el = document.querySelector(sel);
@@ -209,7 +209,7 @@ const handleCombobox = async (page, inputHandle, textValue) => {
         if (!dropdownFound) {
             console.log(`  Combobox: no dropdown appeared for "${valString}", pressing Enter as fallback.`);
             await page.keyboard.press('ArrowDown');
-            await new Promise(r => setTimeout(r, 300));
+            // await new Promise(r => setTimeout(r, 50));
             await page.keyboard.press('Enter');
             return false;
         }
@@ -255,12 +255,12 @@ const handleCombobox = async (page, inputHandle, textValue) => {
             return false;
         }, valString);
 
-        await new Promise(r => setTimeout(r, 600));
+        // await new Promise(r => setTimeout(r, 50));
 
         if (!clicked) {
             // Last resort: keyboard navigation
             await page.keyboard.press('ArrowDown');
-            await new Promise(r => setTimeout(r, 300));
+            // await new Promise(r => setTimeout(r, 50));
             await page.keyboard.press('Enter');
         }
 
@@ -326,7 +326,7 @@ const handleNativeSelect = async (page, selectHandle, value) => {
                 el.dispatchEvent(new Event('input', { bubbles: true }));
             }, selectHandle, match.value);
             
-            await new Promise(r => setTimeout(r, 400));
+            // await new Promise(r => setTimeout(r, 50));
         } else if (options.length > 0) {
             // After the first match attempt, if no match found, try scoring by word overlap
             const targetWords = targetVal.split(/\s+/);
@@ -344,7 +344,7 @@ const handleNativeSelect = async (page, selectHandle, value) => {
                     el.dispatchEvent(new Event('change', { bubbles: true }));
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                 }, selectHandle, bestOption.value);
-                await new Promise(r => setTimeout(r, 400));
+                // await new Promise(r => setTimeout(r, 50));
             } else {
                 // Last resort: select the second option (skip placeholder)
                 const firstReal = options[options.length > 1 ? 1 : 0];
@@ -355,7 +355,7 @@ const handleNativeSelect = async (page, selectHandle, value) => {
                         el.dispatchEvent(new Event('change', { bubbles: true }));
                         el.dispatchEvent(new Event('input', { bubbles: true }));
                     }, selectHandle, firstReal.value);
-                    await new Promise(r => setTimeout(r, 400));
+                    // await new Promise(r => setTimeout(r, 50));
                 }
             }
         }
@@ -508,7 +508,7 @@ const fillFormFields = async (page, answers) => {
                 if (!triggerHandle) continue;
 
                 await triggerHandle.click();
-                await new Promise(r => setTimeout(r, 800));
+                // await new Promise(r => setTimeout(r, 50));
 
                 const availableOptions = await page.evaluate(() =>
                     Array.from(document.querySelectorAll('[role="listbox"] [role="option"], [role="option"]'))
@@ -533,7 +533,7 @@ const fillFormFields = async (page, answers) => {
                 }, refinedAnswer || effectiveAnswer);
 
                 if (!clicked) await page.keyboard.press('Escape');
-                await new Promise(r => setTimeout(r, 400));
+                // await new Promise(r => setTimeout(r, 50));
             } catch (e) {
                 console.log(`  Warning: could not fill custom dropdown for "${questionText}":`, e.message);
             }
@@ -572,7 +572,7 @@ const fillFormFields = async (page, answers) => {
                             if (lbl) lbl.click();
                             else inp.click();
                         }, input);
-                        await new Promise(r => setTimeout(r, 300));
+                        // await new Promise(r => setTimeout(r, 50));
 
                         // Method 2: If still not checked, dispatch React-compatible synthetic events
                         const isChecked = await page.evaluate(el => el.checked, input);
@@ -586,7 +586,7 @@ const fillFormFields = async (page, answers) => {
                                 inp.dispatchEvent(new Event('change', { bubbles: true }));
                                 inp.dispatchEvent(new Event('input', { bubbles: true }));
                             }, input);
-                            await new Promise(r => setTimeout(r, 200));
+                            // await new Promise(r => setTimeout(r, 50));
                         }
 
                         clicked = true;
@@ -643,7 +643,7 @@ const fillFormFields = async (page, answers) => {
                                 else inp.click();
                                 inp.dispatchEvent(new Event('change', { bubbles: true }));
                             }, cb);
-                            await new Promise(r => setTimeout(r, 200));
+                            // await new Promise(r => setTimeout(r, 50));
                         }
                     }
                 }
@@ -681,7 +681,7 @@ const fillFormFields = async (page, answers) => {
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     el.dispatchEvent(new Event('change', { bubbles: true }));
                 }, dateInput, dateVal);
-                await new Promise(r => setTimeout(r, 300));
+                // await new Promise(r => setTimeout(r, 50));
                 console.log(`  ✔ Date set: "${dateVal}"`);
             } catch (e) {
                 console.log(`  Warning: could not fill date for "${questionText}":`, e.message);
@@ -731,7 +731,7 @@ const fillFormFields = async (page, answers) => {
                     const customTrigger = group2 && await group2.$(CUSTOM_DROPDOWN_SELECTOR);
                     if (customTrigger) {
                         await customTrigger.click();
-                        await new Promise(r => setTimeout(r, 800));
+                        // await new Promise(r => setTimeout(r, 50));
                         await page.evaluate((val) => {
                             const opts = Array.from(document.querySelectorAll('[role="option"]')).filter(e => e.offsetParent !== null);
                             for (const o of opts) {
@@ -744,21 +744,50 @@ const fillFormFields = async (page, answers) => {
                     }
                 }
 
-                await new Promise(r => setTimeout(r, 200));
+                // await new Promise(r => setTimeout(r, 50));
             } catch (e) {
                 console.log(`  Warning: could not fill text for "${questionText}":`, e.message);
             }
         }
     }
 
-    await new Promise(r => setTimeout(r, 500));
+    // await new Promise(r => setTimeout(r, 50));
     return 'OK';
 };
 
 // ---------------------------------------------------------------------------
-// Helper: try selecting resume by name, then fall back to file upload
+// Helper: upload the generated resume, falling back to selecting by name
 // ---------------------------------------------------------------------------
 const handleResumeStep = async (page, answers = {}) => {
+    let uploaded = false;
+
+    // 1. Always prioritize uploading the newly generated resume
+    if (fs.existsSync(resumePath)) {
+        const fileInputs = await page.$$('input[type="file"]');
+        if (fileInputs.length > 0) {
+            console.log(`  Found ${fileInputs.length} file input(s) on this step.`);
+            for (const input of fileInputs) {
+                try {
+                    await input.uploadFile(resumePath);
+                    console.log('  Resume uploaded from file: onkar_resume.pdf. Waiting for LinkedIn to process...');
+                    // Wait 2 seconds for LinkedIn's upload XHR and UI update to complete
+                    await new Promise(r => setTimeout(r, 2000));
+                    uploaded = true;
+                    break;
+                } catch (err) {
+                    console.log('  Failed to upload resume:', err.message);
+                }
+            }
+        }
+        
+        // If onkar_resume.pdf exists, we NEVER want to fallback to selecting an old, stale resume by name.
+        // Even if we didn't find a file input on this specific step, we return early.
+        return;
+    } else {
+        console.log('  onkar_resume.pdf not found at backend/data/onkar_resume.pdf.');
+    }
+
+    // 2. Fallback to selecting an existing resume by name (only if no dynamic resume exists)
     const targetResume = process.env.RESUME_NAME || answers['resume name'] || '';
     if (!targetResume) {
         console.log('  No resume name configured. Skipping named selection.');
@@ -785,21 +814,6 @@ const handleResumeStep = async (page, answers = {}) => {
         if (resumeSelected) {
             console.log(`  Selected named resume: ${targetResume}`);
             return;
-        }
-    }
-
-    // Fallback: file upload
-    const fileInputs = await page.$$('input[type="file"]');
-    for (const input of fileInputs) {
-        if (fs.existsSync(resumePath)) {
-            try {
-                await input.uploadFile(resumePath);
-                console.log('  Resume uploaded from file: resume.pdf');
-            } catch (err) {
-                console.log('  Failed to upload resume:', err.message);
-            }
-        } else {
-            console.log('  resume.pdf not found at backend/data/resume.pdf — skipping upload.');
         }
     }
 };
@@ -880,7 +894,7 @@ const recoverLinkedInFormErrors = async (page, answers) => {
 
             console.log(`    ✔ Fixed "${field.labelText}" → "${fixValue}"`);
         }
-        await new Promise(r => setTimeout(r, 400));
+        // await new Promise(r => setTimeout(r, 50));
     } catch (e) {
         console.log('  recoverLinkedInFormErrors error:', e.message);
     }
@@ -920,7 +934,7 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
                     return !!(loader && loader.offsetParent !== null);
                 });
                 if (!loaderVisible) break;
-                await new Promise(r => setTimeout(r, 500));
+                // await new Promise(r => setTimeout(r, 50));
             }
         } catch (e) {
             // ignore
@@ -965,11 +979,11 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
                 const modal = document.querySelector('.jobs-easy-apply-modal__content, .artdeco-modal__content');
                 if (modal) modal.scrollTo({ top: modal.scrollHeight, behavior: 'smooth' });
             });
-            await new Promise(r => setTimeout(r, 1500));
+            // await new Promise(r => setTimeout(r, 50));
 
             console.log('  Submitting application...');
             await btnToClick.click();
-            await new Promise(r => setTimeout(r, 2500));
+            // await new Promise(r => setTimeout(r, 50));
             applicationSubmitted = true;
             clicked = true;
 
@@ -982,7 +996,7 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
             console.log('  Clicking "Review"...');
             await btnToClick.click();
             clicked = true;
-            await new Promise(r => setTimeout(r, 1500));
+            // await new Promise(r => setTimeout(r, 50));
 
             // ── Task 9: Log error text + attempt targeted re-fill ──
             const reviewErrors = await page.$$('.artdeco-inline-feedback--error');
@@ -993,7 +1007,7 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
                 await recoverLinkedInFormErrors(page, answers);
                 // Step 2: Full re-fill pass for any remaining blanks
                 await fillFormFields(page, answers);
-                await new Promise(r => setTimeout(r, 800));
+                // await new Promise(r => setTimeout(r, 50));
                 const stillErrors = await page.$$('.artdeco-inline-feedback--error');
                 if (stillErrors.length > 0) {
                     await screenshotOnFailure(page, 'review');
@@ -1007,7 +1021,7 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
             console.log(`  Clicking "${nextBtn.text}"...`);
             await btnToClick.click();
             clicked = true;
-            await new Promise(r => setTimeout(r, 1500));
+            // await new Promise(r => setTimeout(r, 50));
 
             // ── Task 9: Log error text + attempt targeted re-fill ──
             const errors = await page.$$('.artdeco-inline-feedback--error');
@@ -1018,7 +1032,7 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
                 await recoverLinkedInFormErrors(page, answers);
                 // Step 2: Full re-fill pass for any remaining blanks
                 await fillFormFields(page, answers);
-                await new Promise(r => setTimeout(r, 800));
+                // await new Promise(r => setTimeout(r, 50));
                 const stillErrors = await page.$$('.artdeco-inline-feedback--error');
                 if (stillErrors.length > 0) {
                     await screenshotOnFailure(page, 'next');
@@ -1069,7 +1083,7 @@ const run = async () => {
         } catch (err) {
             if (err.message && (err.message.includes('detached') || err.message.includes('destroyed') || err.message.includes('Node is detached'))) {
                 console.log('  [safeEvaluate] Stale element — retrying in 1s...');
-                await new Promise(r => setTimeout(r, 1000));
+                // await new Promise(r => setTimeout(r, 50));
                 try {
                     return await page.evaluate(fn, ...args);
                 } catch (_) {
@@ -1136,7 +1150,7 @@ const run = async () => {
                         const pane = document.querySelector('.jobs-search-results-list');
                         if (pane) pane.scrollTop += 600;
                     });
-                    await new Promise(r => setTimeout(r, 800 + Math.random() * 700));
+                    await new Promise(r => setTimeout(r, 400 + Math.random() * 300));
                 }
 
                 const jobs = await page.$$('.job-card-container');
@@ -1159,9 +1173,9 @@ const run = async () => {
                         if (!jobsList[i]) continue;
 
                         await page.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), jobsList[i]);
-                        await new Promise(r => setTimeout(r, 800 + Math.random() * 500));
+                        await new Promise(r => setTimeout(r, 400 + Math.random() * 300));
                         await jobsList[i].click();
-                        await new Promise(r => setTimeout(r, 2500 + Math.random() * 1500));
+                        await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
 
                         // Skip if already applied
                         const appliedBadge = await page.$('.artdeco-inline-feedback--success');
@@ -1180,13 +1194,19 @@ const run = async () => {
                                 document.querySelector('.jobs-unified-top-card__company-name') ||
                                 document.querySelector('.job-details-jobs-unified-top-card__primary-description a') ||
                                 document.querySelector('.job-details-jobs-unified-top-card__primary-description');
+                            const jdEl = document.querySelector(
+                                '#job-details, .jobs-description__content, .jobs-description-content__text, ' +
+                                '.job-details-jobs-unified-top-card__job-description, article.jobs-description'
+                            );
                             return {
                                 title: titleEl ? titleEl.innerText.trim() : 'Unknown Job',
                                 company: companyEl ? companyEl.innerText.trim() : 'Unknown Company',
-                                url: window.location.href
+                                url: window.location.href,
+                                jobDescription: jdEl ? (jdEl.innerText || jdEl.textContent).trim() : ''
                             };
                         });
                         jobInfo = { ...jobInfo, ...fetchedInfo };
+
                         console.log(`  Job: "${jobInfo.title}" at ${jobInfo.company}`);
 
                         if (isJobApplied(jobInfo.title)) {
@@ -1212,7 +1232,16 @@ const run = async () => {
                                 await new Promise(r => setTimeout(r, 2000));
                             }
 
+                            if (attempt === 1 && jobInfo.jobDescription) {
+                                try {
+                                    const { generateTailoredResume } = require('../utils/resumeGenerator');
+                                    await generateTailoredResume(jobInfo.jobDescription);
+                                } catch (err) {
+                                    console.log('  ⚠️ Error triggering resume generation:', err.message);
+                                }
+                            }
                             result = await attemptApply(page, jobInfo, attempt, presetAnswers);
+
 
                             if (result === 'submitted') {
                                 jobsApplied++;

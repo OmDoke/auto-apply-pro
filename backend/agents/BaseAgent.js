@@ -253,7 +253,7 @@ class BaseAgent {
             }, { idx, answer });
         }
 
-        await new Promise(r => setTimeout(r, 500));
+        // await new Promise(r => setTimeout(r, 500));
     }
 
     async handleResumeStep(resumePath, targetResume) {
@@ -323,7 +323,7 @@ class BaseAgent {
 
         while (maxSteps > 0 && !applicationSubmitted) {
             maxSteps--;
-            await new Promise(r => setTimeout(r, 1500));
+            // await new Promise(r => setTimeout(r, 1500));
 
             await this.handleResumeStep(resumePath, targetResume);
             await this.fillFormFields(presetAnswers);
@@ -351,11 +351,11 @@ class BaseAgent {
                         modal.scrollTo({ top: modal.scrollHeight, behavior: 'smooth' });
                     }
                 });
-                await new Promise(r => setTimeout(r, 1500));
+                // await new Promise(r => setTimeout(r, 1500));
                 
                 console.log(`[${this.agentName}] Submitting application...`);
                 await btnToClick.click();
-                await new Promise(r => setTimeout(r, 2500));
+                // await new Promise(r => setTimeout(r, 2500));
                 applicationSubmitted = true;
                 clicked = true;
 
@@ -367,7 +367,7 @@ class BaseAgent {
                 console.log(`[${this.agentName}] Clicking "Review"...`);
                 await btnToClick.click();
                 clicked = true;
-                await new Promise(r => setTimeout(r, 1500));
+                // await new Promise(r => setTimeout(r, 1500));
 
                 const reviewErrors = await this.page.$$(this.selectors.errorFeedback);
                 if (reviewErrors.length > 0) {
@@ -380,7 +380,7 @@ class BaseAgent {
                 console.log(`[${this.agentName}] Clicking "${nextBtn.text}"...`);
                 await btnToClick.click();
                 clicked = true;
-                await new Promise(r => setTimeout(r, 1500));
+                // await new Promise(r => setTimeout(r, 1500));
 
                 const errors = await this.page.$$(this.selectors.errorFeedback);
                 if (errors.length > 0) {

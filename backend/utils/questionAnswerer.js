@@ -82,8 +82,9 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
     }
 
     // ---------- Notice period / Can you start immediately ----------
-    if (normalizedQ.includes('notice') || normalizedQ.includes('joining') || normalizedQ.includes('how soon can you join') ||
-        normalizedQ.includes('start immediately') || normalizedQ.includes('immediate') || normalizedQ.includes('can you start')) {
+    if (normalizedQ.includes('notice') || normalizedQ.includes('joining') || normalizedQ.includes('how soon') ||
+        normalizedQ.includes('start immediately') || normalizedQ.includes('immediate') || normalizedQ.includes('can you start') ||
+        normalizedQ.includes('available to join')) {
         // For dropdowns/radio: return a text label that can match options like '15 days', '0-1 month'
         if (context && (context.type === 'select' || context.type === 'custom-dropdown' || context.type === 'radio')) {
             // Yes/No radio: "Can you start immediately?" → No (we have 15-day notice)
@@ -113,14 +114,21 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
             }
             return '15 days';
         }
-        let noticeVal = data['notice period'] ?? '15';
-        if (context && context.source === 'linkedin' && normalizedQ.includes('weeks')) {
-            const num = parseInt(noticeVal);
-            if (!isNaN(num)) {
-                if (noticeVal.toLowerCase().includes('day') || num > 5) {
-                    return String(Math.round(num / 7));
+        let noticeVal = String(data['notice period'] ?? '15');
+        if (context && context.source === 'linkedin') {
+            if (normalizedQ.includes('weeks')) {
+                const num = parseInt(noticeVal);
+                if (!isNaN(num)) {
+                    if (noticeVal.toLowerCase().includes('day') || num > 5) {
+                        return String(Math.round(num / 7));
+                    }
+                    return String(num);
                 }
-                return String(num);
+            } else if (normalizedQ.includes('in days')) {
+                const num = parseInt(noticeVal);
+                if (!isNaN(num)) {
+                    return String(num);
+                }
             }
         }
         return noticeVal;

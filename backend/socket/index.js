@@ -8,7 +8,14 @@ function initializeSocket(server) {
 
     const io = new Server(server, {
         cors: {
-            origin: allowedOrigins,
+            origin: (origin, callback) => {
+                if (!origin || allowedOrigins.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+                    callback(null, true);
+                } else {
+                    console.error('Socket CORS blocked origin:', origin);
+                    callback(new Error('Socket CORS: origin not allowed'));
+                }
+            },
             methods: ['GET', 'POST']
         }
     });

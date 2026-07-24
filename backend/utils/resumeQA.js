@@ -40,7 +40,7 @@ const logQA = (message) => {
     } catch (e) {}
 };
 const getLLMClient = () => {
-    const modelName = process.env.GROQ_MODEL || 'deepseek-r1-distill-llama-70b';
+    const modelName = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
     if (!_llmClient || _llmModel !== modelName) {
         _llmClient = new ChatGroq({
             apiKey: process.env.GROQ_API_KEY,
@@ -71,7 +71,7 @@ const invokeWithBackoff = async (llm, prompt, maxRetries = 3) => {
 async function getResumeText() {
     if (cachedResumeText) return cachedResumeText;
 
-    const resumePath = path.join(__dirname, '..', 'data', 'resume.pdf');
+    const resumePath = path.join(__dirname, '..', 'data', 'onkar_resume.pdf');
     if (!fs.existsSync(resumePath)) {
         logQA(`[${new Date().toISOString()}] Resume PDF not found at: ${resumePath}\n`);
         return '';
@@ -185,4 +185,6 @@ Answer:`);
 module.exports = {
     getAIAnswer,
     getResumeText,
+    getLLMClient,
+    invokeWithBackoff
 };

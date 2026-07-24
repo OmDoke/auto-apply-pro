@@ -24,9 +24,10 @@ const allowedOrigins = process.env.ALLOWED_ORIGIN
 
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || allowedOrigins.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
             callback(null, true);
         } else {
+            console.error('CORS blocked origin:', origin);
             callback(new Error('CORS: origin not allowed'));
         }
     },

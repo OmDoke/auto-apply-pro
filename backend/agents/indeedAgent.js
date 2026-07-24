@@ -255,7 +255,7 @@ class IndeedAgent extends BaseAgent {
                 }
             }
 
-            await new Promise(r => setTimeout(r, 500));
+            // await new Promise(r => setTimeout(r, 500));
         } catch (e) {
             console.log(`[${this.agentName}] Error recovery failed: ${e.message}`);
         }
@@ -445,7 +445,7 @@ class IndeedAgent extends BaseAgent {
                         return hasActionable && !isStillLoading;
                     }).catch(() => false);
                     if (isLoaded) break;
-                    await new Promise(r => setTimeout(r, 500));
+                    // await new Promise(r => setTimeout(r, 500));
                 }
 
                 const currentUrl = applyPage.url();
@@ -557,7 +557,7 @@ class IndeedAgent extends BaseAgent {
                             return loader === null;
                         }).catch(() => false);
                         if (isLoaded) break;
-                        await new Promise(r => setTimeout(r, 500));
+                        // await new Promise(r => setTimeout(r, 500));
                     }
 
                 } else if (continueBtn) {
@@ -584,7 +584,7 @@ class IndeedAgent extends BaseAgent {
                             return loader === null && document.querySelector('button, input, select') !== null;
                         }).catch(() => false);
                         if (isLoaded) break;
-                        await new Promise(r => setTimeout(r, 500));
+                        // await new Promise(r => setTimeout(r, 500));
                     }
 
                     // Check for form errors after clicking
@@ -608,7 +608,7 @@ class IndeedAgent extends BaseAgent {
                 }
             } catch (stepErr) {
                 console.log(`[${this.agentName}] Error in step iteration, waiting 1.5s to retry: ${stepErr.message}`);
-                await new Promise(r => setTimeout(r, 1500));
+                // await new Promise(r => setTimeout(r, 1500));
             }
         }
 
@@ -637,10 +637,10 @@ class IndeedAgent extends BaseAgent {
 
         // ── Step 3: Click card to load detail panel ──
         await this.page.evaluate(el => el.scrollIntoView({ block: 'center' }), titleEl);
-        await new Promise(r => setTimeout(r, 1500)); // small pause before click
+        // await new Promise(r => setTimeout(r, 1500)); // small pause before click
         await this.page.evaluate(el => el.click(), titleEl);
         await this.page.waitForSelector('#jobsearch-ViewjobPaneWrapper, #jobDescriptionText', { timeout: 10000 }).catch(() => {});
-        await new Promise(r => setTimeout(r, 1500)); // small settle
+        // await new Promise(r => setTimeout(r, 1500)); // small settle
 
         // ── Step 4: Confirm "Apply with Indeed" button exists in right panel ──
         const applyBtn = await this.findApplyWithIndeedButton(this.page);
@@ -674,7 +674,7 @@ class IndeedAgent extends BaseAgent {
                 applyBtn.click(),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Click timeout')), 3000))
             ]);
-            await new Promise(r => setTimeout(r, 1500));
+            // await new Promise(r => setTimeout(r, 1500));
             tabOpened = await checkTab();
         } catch (_) {}
 
@@ -685,7 +685,7 @@ class IndeedAgent extends BaseAgent {
                 const box = await applyBtn.boundingBox();
                 if (box) {
                     await this.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-                    await new Promise(r => setTimeout(r, 1500));
+                    // await new Promise(r => setTimeout(r, 1500));
                     tabOpened = await checkTab();
                 }
             } catch (_) {}
@@ -697,7 +697,7 @@ class IndeedAgent extends BaseAgent {
                 console.log(`[${this.agentName}] Coordinate click did not open tab. Trying focus + Enter keypress...`);
                 await applyBtn.focus();
                 await applyBtn.press('Enter');
-                await new Promise(r => setTimeout(r, 1500));
+                // await new Promise(r => setTimeout(r, 1500));
                 tabOpened = await checkTab();
             } catch (_) {}
         }
