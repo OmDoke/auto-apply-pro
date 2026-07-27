@@ -4,6 +4,27 @@ const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const { getAnswer } = require('../utils/questionAnswerer');
 
+// ---------------------------------------------------------------------------
+// Logging helpers — timestamp + elapsed timer
+// ---------------------------------------------------------------------------
+// ts() → "[HH:MM:SS.mmm]" prefix for every log line
+const ts = () => {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    const ms = String(d.getMilliseconds()).padStart(3, '0');
+    return `[${hh}:${mm}:${ss}.${ms}]`;
+};
+
+// timer() → call start = timer(), then log(start, 'label') to print elapsed ms
+const timer = () => Date.now();
+const elapsed = (start) => `(${Date.now() - start}ms)`;
+
+// Wrap the native console.log to auto-prepend timestamp
+const _log = console.log.bind(console);
+console.log = (...args) => _log(ts(), ...args);
+
 // answers.json is loaded fresh each run — see loadAnswers() helper
 const answersPath = path.join(__dirname, '..', 'data', 'answers.json');
 
@@ -170,7 +191,8 @@ const handleCombobox = async (page, inputHandle, textValue) => {
         // await new Promise(r => setTimeout(r, 50));
 
         // Step 2: Type slowly to trigger LinkedIn's typeahead API
-        await inputHandle.type(valString);
+        await inputHandle.type(valString, { delay: 50 });
+        await new Promise(r => setTimeout(r, 500)); // wait for network response
 
         // Step 3: Wait for autocomplete dropdown to appear (up to 3 seconds)
         const dropdownSelectors = [
@@ -195,7 +217,7 @@ const handleCombobox = async (page, inputHandle, textValue) => {
 
         let dropdownFound = false;
         for (let wait = 0; wait < 6; wait++) {
-            // await new Promise(r => setTimeout(r, 50));
+            await new Promise(r => setTimeout(r, 500));
             dropdownFound = await page.evaluate((selectors) => {
                 for (const sel of selectors) {
                     const el = document.querySelector(sel);
@@ -466,22 +488,61 @@ const fillFormFields = async (page, answers) => {
         }).filter(g => g.questionText !== '');
     }, CUSTOM_DROPDOWN_SELECTOR);
 
-    for (const { idx, questionText, type, options } of formGroups) {
-        // Get the best answer for this question
-        const answer = await getAnswer(questionText, answers, { type, options, source: 'linkedin' });
+    // Deduplicate groups by (questionText, type) — LinkedIn sometimes stamps duplicate DOM
+    // elements for the same field (causing the same LLM call to be made twice)
+    const seenKeys = new Set();
+    const uniqueFormGroups = formGroups.filter(({ questionText, type }) => {
+        const key = `${questionText.toLowerCase().trim()}||${type}`;
+        if (seenKeys.has(key)) return false;
+        seenKeys.add(key);
+        return true;
+    });
 
-        // ── TASK 5 FIX: Log unanswered questions — never silently skip ──
-        if (!answer) {
-            console.log(`  ⚠️  [UNANSWERED] "${questionText}" (type: ${type}${options.length ? ', options: ' + JSON.stringify(options.slice(0, 5)) : ''})`);
-            // For radio/select/checkbox with options, auto-select first as fallback
-            if ((type === 'radio' || type === 'select' || type === 'checkbox') && options.length > 0) {
-                console.log(`  ↳ Auto-fallback: using first option "${options[0]}"`);
-            } else {
-                continue;
-            }
+    // Per-fill answer cache — each unique question is resolved at most once per fill pass
+    const answerCache = new Map();
+
+    for (const { idx, questionText, type, options } of uniqueFormGroups) {
+        // ── Month/year selects ("From", "To", "Start", "End") must match from options, not from generic answers ──
+        // These fields appear in experience/education sections with month options like ["January","February",...]
+        const isMonthField = type === 'select' && options.length >= 3 &&
+            ['january','february','march','april','may','june','july','august','september','october','november','december']
+                .some(m => options.some(o => o.toLowerCase().startsWith(m)));
+
+        // Get the best answer for this question (use cache to avoid duplicate LLM calls)
+        const cacheKey = `${questionText.toLowerCase().trim()}||${type}`;
+        let answer;
+        if (answerCache.has(cacheKey)) {
+            answer = answerCache.get(cacheKey);
+        } else {
+            answer = await getAnswer(questionText, answers, { type, options, source: 'linkedin' });
+            answerCache.set(cacheKey, answer);
         }
 
-        const effectiveAnswer = answer || options[0];
+        // For month selects: if the resolved answer isn't in the options list, skip to avoid wrong value
+        let effectiveAnswer;
+        if (isMonthField) {
+            const ansLower = (answer || '').toLowerCase();
+            const matchedMonth = options.find(o => o.toLowerCase().includes(ansLower) || ansLower.includes(o.toLowerCase()));
+            if (matchedMonth) {
+                effectiveAnswer = matchedMonth;
+            } else {
+                // Default to first month option (January) rather than a numeric/wrong answer
+                effectiveAnswer = options[0];
+                console.log(`  ℹ️  Month field "${questionText}": defaulting to "${effectiveAnswer}"`);
+            }
+        } else {
+            // ── TASK 5 FIX: Log unanswered questions — never silently skip ──
+            if (!answer) {
+                console.log(`  ⚠️  [UNANSWERED] "${questionText}" (type: ${type}${options.length ? ', options: ' + JSON.stringify(options.slice(0, 5)) : ''})`);
+                // For radio/select/checkbox with options, auto-select first as fallback
+                if ((type === 'radio' || type === 'select' || type === 'checkbox') && options.length > 0) {
+                    console.log(`  ↳ Auto-fallback: using first option "${options[0]}"`);
+                } else {
+                    continue;
+                }
+            }
+            effectiveAnswer = answer || options[0];
+        }
 
         // ── TASK 2: Always look up by data-aagroup to avoid index drift ──
         const getGroup = () => page.$(`[data-aagroup="${idx}"]`);
@@ -719,7 +780,10 @@ const fillFormFields = async (page, answers) => {
                 }, inputHandle);
 
                 if (isCityField || isCombobox) {
-                    await handleCombobox(page, inputHandle, effectiveAnswer);
+                    // Combobox/city: handleCombobox selects from dropdown — value may differ from typed text
+                    // so we only fall through to custom-dropdown check if NO suggestion was selected at all
+                    const comboSelected = await handleCombobox(page, inputHandle, effectiveAnswer);
+                    if (comboSelected) continue; // suggestion was picked — no further action needed
                 } else {
                     await typeIntoInput(page, inputHandle, effectiveAnswer);
                 }
@@ -768,10 +832,19 @@ const handleResumeStep = async (page, answers = {}) => {
             console.log(`  Found ${fileInputs.length} file input(s) on this step.`);
             for (const input of fileInputs) {
                 try {
+                    const uploadStart = timer();
                     await input.uploadFile(resumePath);
                     console.log('  Resume uploaded from file: onkar_resume.pdf. Waiting for LinkedIn to process...');
-                    // Wait 2 seconds for LinkedIn's upload XHR and UI update to complete
-                    await new Promise(r => setTimeout(r, 2000));
+                    // Poll until LinkedIn's upload indicator disappears (max ~3s)
+                    for (let u = 0; u < 15; u++) {
+                        const uploading = await page.evaluate(() => {
+                            const prog = document.querySelector('[class*="upload"][class*="progress"], [class*="uploading"], .jobs-easy-apply-resume-upload__uploading');
+                            return !!(prog && prog.offsetParent !== null);
+                        });
+                        if (!uploading) break;
+                        await new Promise(r => setTimeout(r, 200));
+                    }
+                    console.log(`  ✔ Resume upload processed ${elapsed(uploadStart)}`);
                     uploaded = true;
                     break;
                 } catch (err) {
@@ -921,34 +994,39 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
 
     console.log('  Modal opened. Filling form...');
     let applicationSubmitted = false;
+    let resumeUploaded = false; // track per-attempt to avoid re-uploading on every step
     let maxSteps = 20;
 
     while (maxSteps > 0 && !applicationSubmitted) {
         maxSteps--;
-        // Wait for any loading spinner to disappear
+        // Wait for any loading spinner to disappear (poll up to ~1s, 10 rapid checks)
         try {
-            let loaderVisible = true;
-            for (let spinWait = 0; spinWait < 15; spinWait++) {
-                loaderVisible = await page.evaluate(() => {
+            for (let spinWait = 0; spinWait < 10; spinWait++) {
+                const loaderVisible = await page.evaluate(() => {
                     const loader = document.querySelector('.artdeco-loader, [class*="loader"], [class*="spinner"]');
                     return !!(loader && loader.offsetParent !== null);
                 });
                 if (!loaderVisible) break;
-                // await new Promise(r => setTimeout(r, 50));
+                await new Promise(r => setTimeout(r, 100));
             }
         } catch (e) {
             // ignore
         }
 
-        // A) Handle resume step
-        await handleResumeStep(page, answers);
+        // A) Handle resume step — only upload once per application attempt
+        if (!resumeUploaded) {
+            await handleResumeStep(page, answers);
+            resumeUploaded = true;
+        }
 
         // B) Fill all form fields — real Puppeteer interactions
+        const fillStart = timer();
         const fillResult = await fillFormFields(page, answers);
         if (fillResult === 'SKIP_JOB') {
             await discardModal(page);
             return 'skipped';
         }
+        console.log(`  ⏱  Form fill took ${elapsed(fillStart)}`);
 
         // C) Identify and click the best action button
         const actionButtons = await page.$$('.artdeco-button--primary');
@@ -979,10 +1057,11 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
                 const modal = document.querySelector('.jobs-easy-apply-modal__content, .artdeco-modal__content');
                 if (modal) modal.scrollTo({ top: modal.scrollHeight, behavior: 'smooth' });
             });
-            // await new Promise(r => setTimeout(r, 50));
 
+            const submitStart = timer();
             console.log('  Submitting application...');
             await btnToClick.click();
+            console.log(`  ⏱  Submit click took ${elapsed(submitStart)}`);
             // await new Promise(r => setTimeout(r, 50));
             applicationSubmitted = true;
             clicked = true;
@@ -993,9 +1072,11 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
         } else if (reviewBtn) {
             btnToClick = reviewBtn.btn;
             btnType = 'review';
+            const reviewStart = timer();
             console.log('  Clicking "Review"...');
             await btnToClick.click();
             clicked = true;
+            console.log(`  ⏱  Review click + response took ${elapsed(reviewStart)}`);
             // await new Promise(r => setTimeout(r, 50));
 
             // ── Task 9: Log error text + attempt targeted re-fill ──
@@ -1018,9 +1099,11 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
         } else if (nextBtn) {
             btnToClick = nextBtn.btn;
             btnType = 'next';
+            const nextStart = timer();
             console.log(`  Clicking "${nextBtn.text}"...`);
             await btnToClick.click();
             clicked = true;
+            console.log(`  ⏱  Next click + response took ${elapsed(nextStart)}`);
             // await new Promise(r => setTimeout(r, 50));
 
             // ── Task 9: Log error text + attempt targeted re-fill ──
@@ -1144,13 +1227,13 @@ const run = async () => {
                 await page.waitForSelector('.job-card-container', { timeout: 10000 });
                 console.log(`Job listings loaded for page ${currentPage}.`);
 
-                for (let i = 0; i < 5; i++) {
-                    if (stopped) break;
+                // Single scroll pass to ensure all cards render (lazy-loaded images etc.)
+                if (!stopped) {
                     await page.evaluate(() => {
                         const pane = document.querySelector('.jobs-search-results-list');
-                        if (pane) pane.scrollTop += 600;
+                        if (pane) pane.scrollTop += 1200;
                     });
-                    await new Promise(r => setTimeout(r, 400 + Math.random() * 300));
+                    await new Promise(r => setTimeout(r, 500));
                 }
 
                 const jobs = await page.$$('.job-card-container');
@@ -1165,7 +1248,7 @@ const run = async () => {
                         break;
                     }
 
-                    console.log(`\nSelecting job ${i + 1} on page ${currentPage}...`);
+                    console.log(`Selecting job ${i + 1} on page ${currentPage}...`);
                     let jobInfo = { title: 'Unknown Job', company: 'Unknown Company', url: 'Unknown URL' };
 
                     try {
@@ -1225,6 +1308,7 @@ const run = async () => {
                         // Retry loop: up to 2 attempts
                         const maxRetries = 2;
                         let result = 'failed';
+                        let resumeUploaded = false;
 
                         for (let attempt = 1; attempt <= maxRetries; attempt++) {
                             if (attempt > 1) {
@@ -1232,15 +1316,19 @@ const run = async () => {
                                 await new Promise(r => setTimeout(r, 2000));
                             }
 
-                            if (attempt === 1 && jobInfo.jobDescription) {
+                            if (attempt === 1 && jobInfo.jobDescription && !resumeUploaded) {
                                 try {
+                                    const resumeStart = timer();
                                     const { generateTailoredResume } = require('../utils/resumeGenerator');
                                     await generateTailoredResume(jobInfo.jobDescription);
+                                    console.log(`  ✔ Resume tailored & generated ${elapsed(resumeStart)}`);
                                 } catch (err) {
                                     console.log('  ⚠️ Error triggering resume generation:', err.message);
                                 }
                             }
+                            const applyStart = timer();
                             result = await attemptApply(page, jobInfo, attempt, presetAnswers);
+                            if (result === 'submitted') console.log(`  ⏱  Apply attempt took ${elapsed(applyStart)}`);
 
 
                             if (result === 'submitted') {
@@ -1357,8 +1445,10 @@ const run = async () => {
                 currentPage++;
                 console.log(`Waiting for page ${currentPage} to load...`);
                 try {
-                    await new Promise(r => setTimeout(r, 4000));
-                    await page.waitForSelector('.job-card-container', { timeout: 30000 });
+                    // Poll until job cards appear (replaces hardcoded 4s wait)
+                    await page.waitForSelector('.job-card-container', { timeout: 15000 });
+                    // Brief settle for card interactions to be ready
+                    await new Promise(r => setTimeout(r, 800));
                     console.log(`Page ${currentPage} loaded.`);
                 } catch (e) {
                     console.log(`Timed out waiting for page ${currentPage} cards. Stopping.`);

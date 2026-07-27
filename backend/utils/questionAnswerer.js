@@ -31,7 +31,16 @@ const SKILL_TOKENS = [
     'numpy', 'tensorflow', 'pytorch', 'next.js', 'nextjs',
     'nest', 'nestjs', 'spring boot', 'kafka', 'rabbitmq', 'jenkins',
     'ci/cd', 'terraform', 'ansible', 'elasticsearch',
-    'software engineering', 'software development'
+    'software engineering', 'software development',
+    // QA / Testing / DevOps
+    'manual testing', 'manual test', 'automation testing', 'automation test',
+    'testing', 'qa', 'quality assurance', 'selenium', 'appium', 'cypress',
+    'postman', 'rest assured', 'jmeter', 'testng', 'junit',
+    'jira', 'agile', 'scrum', 'kanban', 'devops', 'cloud',
+    // Data / BI
+    'tableau', 'power bi', 'excel', 'spark', 'hadoop', 'hive',
+    // Mobile / Other
+    'xamarin', 'unity', 'unreal', 'blender',
 ];
 
 // ---------------------------------------------------------------------------
@@ -73,8 +82,9 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
     const data = { ...loadedUserData, ...userData };
 
     // ---------- Names ----------
-    if (normalizedQ.includes('name') && 
+    if (normalizedQ.includes('name') &&
         !/\b(company|employer|institution|university|school|college|degree)\b/.test(normalizedQ)) {
+        if (normalizedQ.includes('middle')) return ''; // no middle name
         if (normalizedQ.includes('first')) return String(data['first name'] ?? 'Onkar');
         if (normalizedQ.includes('last') || normalizedQ.includes('surname')) return String(data['last name'] ?? 'Doke');
         if (normalizedQ.includes('preferred')) return String(data['preferred name'] ?? data['first name'] ?? 'Onkar');
@@ -194,7 +204,9 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ === 'job title' ||
         normalizedQ === 'title' ||
         normalizedQ === 'role' ||
+        normalizedQ === 'your title' ||
         normalizedQ.includes('job title') ||
+        normalizedQ.includes('your title') ||
         normalizedQ.includes('current job title') ||
         normalizedQ.includes('most recent job title')
     ) {
@@ -350,6 +362,20 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         return String(data['race'] ?? 'Decline to self-identify');
     }
 
+    // ---------- Phone Type (must come before generic phone rule) ----------
+    if (normalizedQ.includes('phone') && normalizedQ.includes('type') && context.options && context.options.length > 0) {
+        const mobileOpt = context.options.find(o => /mobile/i.test(o));
+        if (mobileOpt) return mobileOpt;
+        return context.options[0];
+    }
+
+    // ---------- Address Type (dropdown: Home/Work/Other) ----------
+    if (normalizedQ.includes('address') && normalizedQ.includes('type') && context.options && context.options.length > 0) {
+        const homeOpt = context.options.find(o => /home/i.test(o));
+        if (homeOpt) return homeOpt;
+        return context.options[0];
+    }
+
     // ---------- Phone / Mobile number (must come BEFORE fuzzy to avoid surname match) ----------
     if (
         normalizedQ.includes('phone') ||
@@ -400,7 +426,8 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
     }
 
     // ---------- City (return just "Pune" for city inputs) ----------
-    if (normalizedQ.includes('city') && !normalizedQ.includes('address')) {
+    // Handles "City", "Legal Address - City", "Current City" — always return city, not full address
+    if (normalizedQ.includes('city')) {
         return String(data['city'] ?? 'Pune');
     }
 
@@ -415,6 +442,11 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         !normalizedQ.includes('understanding')
     ) {
         return String(data['state'] ?? 'Maharashtra');
+    }
+
+    // ---------- County (administrative county — irrelevant in India, return empty) ----------
+    if (normalizedQ === 'county' || (normalizedQ.includes('county') && !normalizedQ.includes('country'))) {
+        return '';
     }
 
     // ---------- Country ----------
@@ -1002,6 +1034,11 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         return String(data['association'] ?? 'No');
     }
 
+    // ---------- Industry ----------
+    if (normalizedQ === 'industry' || (normalizedQ.includes('industry') && normalizedQ.length < 20)) {
+        return String(data['industry'] ?? 'Information Technology and Services');
+    }
+
     // ---------- Project / portfolio description ----------
     if (
         (normalizedQ.includes('project') && (normalizedQ.includes('describe') || normalizedQ.includes('notable') || normalizedQ.includes('best') || normalizedQ.includes('recent'))) ||
@@ -1311,6 +1348,33 @@ const getBestFuzzyMatch = (normalizedQ, userData) => {
 
 
 // ---------------------------------------------------------------------------
+// Direct answers.json lookup — tries normalized key, then substring, then
+// word-overlap match. This runs BEFORE rules and LLM to maximise cache hits.
+// ---------------------------------------------------------------------------
+const getDirectAnswer = (normalizedQ, userData) => {
+    const data = { ...loadedUserData, ...userData };
+    // 1. Exact match on normalized key
+    const exactKey = Object.keys(data).find(k => normalizeText(k) === normalizedQ);
+    if (exactKey !== undefined) return String(data[exactKey]);
+
+    // 2. Normalized question CONTAINS a key (e.g. question has extra words around a known key)
+    const containedKey = Object.keys(data).find(k => {
+        const nk = normalizeText(k);
+        return nk.length > 4 && normalizedQ.includes(nk);
+    });
+    if (containedKey !== undefined) return String(data[containedKey]);
+
+    // 3. Key contains the normalized question (shorter question matches longer key)
+    const reverseKey = Object.keys(data).find(k => {
+        const nk = normalizeText(k);
+        return nk.length > 4 && nk.includes(normalizedQ);
+    });
+    if (reverseKey !== undefined) return String(data[reverseKey]);
+
+    return null;
+};
+
+// ---------------------------------------------------------------------------
 // Main exported function — async (supports AI fallback)
 // ---------------------------------------------------------------------------
 const getAnswer = async (questionText, userData, context = {}) => {
@@ -1319,25 +1383,42 @@ const getAnswer = async (questionText, userData, context = {}) => {
     const normalized = normalizeText(questionText);
     const llmFirst = process.env.LLM_FIRST === 'true';
 
-    // List of keywords that warrant dynamic LLM reasoning
+    // ── Step 0: Direct answers.json lookup (fastest, zero LLM tokens) ──
+    // Check before anything else — if the question or a close variant is already in
+    // answers.json, return it instantly without touching LLM or heavy rule chains.
+    const directAnswer = getDirectAnswer(normalized, userData);
+    if (directAnswer !== null) {
+        // Validate against dropdown options if present
+        if (context.options && context.options.length > 0) {
+            const lowerOpts = context.options.map(o => o.toLowerCase());
+            const directLower = directAnswer.toLowerCase();
+            // If it's a Yes/No dropdown, check validity
+            const isYesNo = lowerOpts.includes('yes') && lowerOpts.includes('no') && context.options.length <= 3;
+            if (!isYesNo || lowerOpts.includes(directLower)) {
+                return directAnswer;
+            }
+            // Fall through to rules if the direct answer isn't a valid option
+        } else {
+            return directAnswer;
+        }
+    }
+
+    // ── DYNAMIC_KEYWORDS: only truly open-ended questions need LLM ──
+    // Removed: 'what is your', 'experience', 'years', 'how many', 'skill' etc.
+    // The rule engine + answers.json handles all of these deterministically.
+    // LLM is only valuable for free-text creative answers: describe/explain/why/cover letter.
     const DYNAMIC_KEYWORDS = [
-        'experience', 'years', 'notice', 'joining', 'salary', 'ctc',
-        'compensation', 'package', 'lpa', 'sponsorship', 'sponsor',
-        'relocat', 'remote', 'work from home', 'education', 'degree',
-        'bachelor', 'master', 'phd', 'graduation', 'certificat',
-        'cover letter', 'summary', 'about yourself', 'why us',
-        // Task 6: expanded set for descriptive / open-ended questions
-        'describe', 'explain', 'tell us', 'how many', 'what is your',
-        'project', 'achievement', 'accomplishment', 'proud of',
-        'skill', 'strength', 'weakness', 'area of improvement',
-        'motivation', 'goal', 'expectation', 'preferred',
-        'reason for', 'why are you', 'why do you want',
-        'work arrangement', 'work model', 'hybrid', 'availability',
-        'cgpa', 'gpa', 'percentage', 'aggregate', 'field of study'
+        'describe', 'explain', 'tell us',
+        'cover letter', 'about yourself',
+        'why do you want', 'why are you interested', 'why this company',
+        'why should we hire', 'why good fit',
+        'proud of', 'accomplishment', 'achievement',
+        'motivation', 'reason for leaving', 'reason for change',
+        'strength', 'weakness', 'area of improvement',
     ];
 
     const isDynamicQuestion = DYNAMIC_KEYWORDS.some(kw => normalized.includes(kw)) &&
-        !/\b(gender|email|name|phone|mobile|contact|address|pincode|zip|linkedin|github|website|job)\b/.test(normalized);
+        !/\b(gender|email|name|phone|mobile|contact|address|pincode|zip|linkedin|github|website)\b/.test(normalized);
 
     // Helper to evaluate static rules and fuzzy matches
     const getStaticAnswer = (normQ, uData, ctx) => {
@@ -1348,7 +1429,6 @@ const getAnswer = async (questionText, userData, context = {}) => {
             if (isYesNoField) {
                 const ruleAnswerLower = ruleAnswer.toLowerCase();
                 if (!lowerOpts.includes(ruleAnswerLower)) {
-                    // Rule answer is not a valid option — discard it and let AI/fallback decide
                     ruleAnswer = null;
                 }
             }
@@ -1362,11 +1442,9 @@ const getAnswer = async (questionText, userData, context = {}) => {
             if (isYesNoField) {
                 const fuzzyAnswerLower = fuzzyAnswer.toLowerCase();
                 if (!lowerOpts.includes(fuzzyAnswerLower)) {
-                    // Fuzzy answer is not a valid option — discard it
                     fuzzyAnswer = null;
                 }
             }
-            // Discard job title fuzzy matching if the question is salutation prefix title
             if (normQ === 'title' && ctx.options.some(o => /mr|ms|dr/i.test(o))) {
                 fuzzyAnswer = null;
             }
@@ -1376,37 +1454,45 @@ const getAnswer = async (questionText, userData, context = {}) => {
         return null;
     };
 
-    // Flow 1: LLM First override
-    if (llmFirst) {
-        const aiAnswer = await getAIAnswer(questionText, context, userData);
-        if (aiAnswer !== null) return aiAnswer;
+    // ── Step 1: Static rules + fuzzy (deterministic, highest priority) ──
+    // Must run BEFORE getDirectAnswer to prevent broad key matches (e.g. "address" key
+    // overriding the specific city rule for "Legal Address - City").
+    const staticAnswer = getStaticAnswer(normalized, userData, context);
+    if (staticAnswer !== null) return staticAnswer;
 
-        // Fallback to rules/fuzzy
-        const staticAnswer = getStaticAnswer(normalized, userData, context);
-        if (staticAnswer !== null) return staticAnswer;
-    } else {
-        // Flow 2: Smart Hybrid
-        // If it's a dynamic question, try LLM first
-        if (isDynamicQuestion) {
-            const aiAnswer = await getAIAnswer(questionText, context, userData);
-            if (aiAnswer !== null) return aiAnswer;
-        }
-
-        // Try static/rules + fuzzy matching
-        const staticAnswer = getStaticAnswer(normalized, userData, context);
-        if (staticAnswer !== null) return staticAnswer;
-
-        // If not matched yet, and it wasn't dynamic, try LLM as fallback
-        if (!isDynamicQuestion) {
-            const aiAnswer = await getAIAnswer(questionText, context, userData);
-            if (aiAnswer !== null) return aiAnswer;
+    // ── Step 2: Direct answers.json lookup (for novel questions not covered by rules) ──
+    const directAnswer = getDirectAnswer(normalized, userData);
+    if (directAnswer !== null) {
+        if (context.options && context.options.length > 0) {
+            const lowerOpts = context.options.map(o => o.toLowerCase());
+            const directLower = directAnswer.toLowerCase();
+            const isYesNo = lowerOpts.includes('yes') && lowerOpts.includes('no') && context.options.length <= 3;
+            if (!isYesNo || lowerOpts.includes(directLower)) {
+                return directAnswer;
+            }
+        } else {
+            return directAnswer;
         }
     }
 
-    // 4. Final safety-net: obvious yes/no questions default to "Yes"
+    // ── Step 3: LLM — only for truly open-ended questions not handled by rules ──
+    if (llmFirst || isDynamicQuestion) {
+        const aiAnswer = await getAIAnswer(questionText, context, userData);
+        if (aiAnswer !== null) return aiAnswer;
+    }
+
+    // 3. Final safety nets
+
+    // 3a. Consent / Agreement / Certification statements (e.g., "I certify that...", "By clicking Yes...", "has my consent")
+    const isConsent = /\b(consent|agree|certify|acknowledge|privacy policy|terms and conditions|understand that)\b/i.test(questionText);
+    if (isConsent && context.options && context.options.map(o => o.toLowerCase()).includes('yes')) {
+        return 'Yes';
+    }
+
+    // 3b. Obvious yes/no questions default to "Yes"
     const isYesNo = /\b(are you|do you|have you|can you|will you|would you|is your|were you|did you)\b/i.test(questionText) && !/\b(how many|how much|what|who|where|when|why|describe|explain)\b/i.test(questionText);
-    const hasYesNoOptions = context.options && 
-        context.options.map(o => o.toLowerCase()).includes('yes') && 
+    const hasYesNoOptions = context.options &&
+        context.options.map(o => o.toLowerCase()).includes('yes') &&
         context.options.map(o => o.toLowerCase()).includes('no') &&
         context.options.length <= 3;
 

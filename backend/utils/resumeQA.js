@@ -3,6 +3,13 @@
 const fs = require('fs');
 const path = require('path');
 
+// ---------------------------------------------------------------------------
+// Session-level LLM disable flag — set to true when TPD (daily token quota)
+// is exhausted so all subsequent getAIAnswer calls skip the network call.
+// ---------------------------------------------------------------------------
+let llmTPDDisabled = false;
+const disableLLMForSession = () => { llmTPDDisabled = true; };
+
 // Use the internal pdf-parse function directly to avoid broken default-export detection
 // across different installed versions of the package.
 let pdf;
@@ -53,20 +60,38 @@ const getLLMClient = () => {
 };
 
 // Exponential back-off wrapper for Groq rate limit errors (429)
+// NOTE: If the error is a daily token quota (TPD), retrying is pointless — fail fast.
 const invokeWithBackoff = async (llm, prompt, maxRetries = 3) => {
+    // Fast-fail: if we already know TPD is exhausted this session, skip the network call
+    if (llmTPDDisabled) {
+        const err = new Error('Groq daily token quota (TPD) exhausted this session — skipping');
+        err.status = 429;
+        throw err;
+    }
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             return await llm.invoke(prompt);
         } catch (err) {
             if (attempt === maxRetries) throw err;
-            const isRateLimit = err?.status === 429 || (err?.message || '').includes('rate limit');
+            const msg = err?.message || '';
+            const isRateLimit = err?.status === 429 || msg.toLowerCase().includes('rate limit');
             if (!isRateLimit) throw err;
+
+            // TPD = tokens-per-day exhausted — retrying won't help, fail immediately
+            const isTPD = msg.includes('TPD') || msg.includes('tokens per day') || msg.includes('per day');
+            if (isTPD) {
+                logQA(`[${new Date().toISOString()}] Groq daily token limit (TPD) exhausted — disabling LLM for this session.\n`);
+                disableLLMForSession(); // prevent any further LLM calls this session
+                throw err;
+            }
+
             const delay = Math.pow(2, attempt) * 1000;
             logQA(`[${new Date().toISOString()}] Groq rate limit hit (attempt ${attempt}). Retrying in ${delay}ms...\n`);
             await new Promise(r => setTimeout(r, delay));
         }
     }
 };
+
 
 async function getResumeText() {
     if (cachedResumeText) return cachedResumeText;
@@ -96,6 +121,9 @@ async function getResumeText() {
 }
 
 async function getAIAnswer(questionText, context = {}, userData = {}) {
+    // Fast-fail if TPD quota was exhausted earlier this session
+    if (llmTPDDisabled) return null;
+
     if (!process.env.GROQ_API_KEY) {
         logQA(`[${new Date().toISOString()}] No GROQ_API_KEY set.\n`);
         return null;
@@ -186,5 +214,6 @@ module.exports = {
     getAIAnswer,
     getResumeText,
     getLLMClient,
-    invokeWithBackoff
+    invokeWithBackoff,
+    disableLLMForSession,
 };
