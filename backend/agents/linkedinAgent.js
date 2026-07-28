@@ -1292,10 +1292,7 @@ const run = async () => {
 
                         console.log(`  Job: "${jobInfo.title}" at ${jobInfo.company}`);
 
-                        if (isJobApplied(jobInfo.title)) {
-                            console.log(`  Skipping already applied job (from previous session): ${jobInfo.title}`);
-                            continue;
-                        }
+
 
                         // Skip restricted companies
                         const restrictedCompanies = ['ht media', 'ht media labs', 'ht media lbas', 'ht labs', 'ht media group'];
