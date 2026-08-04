@@ -534,14 +534,16 @@ const fillFormFields = async (page, answers) => {
             // ── TASK 5 FIX: Log unanswered questions — never silently skip ──
             if (!answer) {
                 console.log(`  ⚠️  [UNANSWERED] "${questionText}" (type: ${type}${options.length ? ', options: ' + JSON.stringify(options.slice(0, 5)) : ''})`);
-                // For radio/select/checkbox with options, auto-select first as fallback
-                if ((type === 'radio' || type === 'select' || type === 'checkbox') && options.length > 0) {
+                // For radio/select, auto-select first as fallback. For checkboxes, leave unchecked.
+                if ((type === 'radio' || type === 'select') && options.length > 0) {
                     console.log(`  ↳ Auto-fallback: using first option "${options[0]}"`);
+                    effectiveAnswer = options[0];
                 } else {
                     continue;
                 }
+            } else {
+                effectiveAnswer = answer;
             }
-            effectiveAnswer = answer || options[0];
         }
 
         // ── TASK 2: Always look up by data-aagroup to avoid index drift ──
@@ -608,6 +610,8 @@ const fillFormFields = async (page, answers) => {
                 const radioInputs = await group.$$('input[type="radio"]');
                 let clicked = false;
 
+                // Pre-compute labels
+                const rData = [];
                 for (const input of radioInputs) {
                     const labelText = await page.evaluate(inp => {
                         const id = inp.id;
@@ -617,12 +621,21 @@ const fillFormFields = async (page, answers) => {
                                 ?.querySelector('label');
                         return lbl ? lbl.innerText.trim() : (inp.value || '');
                     }, input);
+                    rData.push({ input, labelText, labelLower: labelText.toLowerCase() });
+                }
 
-                    if (
-                        labelText.toLowerCase() === effectiveAnswer.toLowerCase() ||
-                        labelText.toLowerCase().includes(effectiveAnswer.toLowerCase()) ||
-                        effectiveAnswer.toLowerCase().includes(labelText.toLowerCase())
-                    ) {
+                const ansLower = effectiveAnswer.toLowerCase();
+                const hasExactMatch = rData.some(r => r.labelLower === ansLower);
+
+                for (const { input, labelText, labelLower } of rData) {
+                    let isMatch = false;
+                    if (hasExactMatch) {
+                        isMatch = (labelLower === ansLower);
+                    } else {
+                        isMatch = labelLower.includes(ansLower) || ansLower.includes(labelLower);
+                    }
+
+                    if (isMatch) {
                         // Method 1: Click the associated label
                         await page.evaluate(inp => {
                             const id = inp.id;
@@ -633,7 +646,6 @@ const fillFormFields = async (page, answers) => {
                             if (lbl) lbl.click();
                             else inp.click();
                         }, input);
-                        // await new Promise(r => setTimeout(r, 50));
 
                         // Method 2: If still not checked, dispatch React-compatible synthetic events
                         const isChecked = await page.evaluate(el => el.checked, input);
@@ -647,7 +659,6 @@ const fillFormFields = async (page, answers) => {
                                 inp.dispatchEvent(new Event('change', { bubbles: true }));
                                 inp.dispatchEvent(new Event('input', { bubbles: true }));
                             }, input);
-                            // await new Promise(r => setTimeout(r, 50));
                         }
 
                         clicked = true;
@@ -678,6 +689,9 @@ const fillFormFields = async (page, answers) => {
                 if (!group) continue;
 
                 const checkboxInputs = await group.$$('input[type="checkbox"]');
+                
+                // Get all labels first
+                const cbData = [];
                 for (const cb of checkboxInputs) {
                     const labelText = await page.evaluate(cb => {
                         const lbl = cb.id
@@ -685,15 +699,22 @@ const fillFormFields = async (page, answers) => {
                             : cb.closest('.fb-form-element__checkbox')?.querySelector('label');
                         return lbl ? lbl.innerText.trim() : (cb.value || '');
                     }, cb);
+                    cbData.push({ cb, labelLower: labelText.toLowerCase() });
+                }
 
-                    const ansLower = effectiveAnswer.toLowerCase();
-                    const labelLower = labelText.toLowerCase();
-                    const isSingleCheckbox = checkboxInputs.length === 1;
+                const ansLower = effectiveAnswer.toLowerCase();
+                const isSingleCheckbox = checkboxInputs.length === 1;
+                const hasExactMatch = cbData.some(d => d.labelLower === ansLower);
 
-                    const shouldCheck = 
-                        (isSingleCheckbox && (ansLower === 'yes' || ansLower === 'true' || ansLower === '1')) ||
-                        ansLower.includes(labelLower) ||
-                        labelLower.includes(ansLower);
+                for (const { cb, labelLower } of cbData) {
+                    let shouldCheck = false;
+                    if (isSingleCheckbox && (ansLower === 'yes' || ansLower === 'true' || ansLower === '1')) {
+                        shouldCheck = true;
+                    } else if (hasExactMatch) {
+                        shouldCheck = (labelLower === ansLower);
+                    } else {
+                        shouldCheck = ansLower.includes(labelLower) || labelLower.includes(ansLower);
+                    }
 
                     if (shouldCheck) {
                         const isChecked = await page.evaluate(el => el.checked, cb);
@@ -704,7 +725,16 @@ const fillFormFields = async (page, answers) => {
                                 else inp.click();
                                 inp.dispatchEvent(new Event('change', { bubbles: true }));
                             }, cb);
-                            // await new Promise(r => setTimeout(r, 50));
+                        }
+                    } else {
+                        const isChecked = await page.evaluate(el => el.checked, cb);
+                        if (isChecked) {
+                            await page.evaluate(inp => {
+                                const lbl = inp.id ? document.querySelector(`label[for="${inp.id}"]`) : null;
+                                if (lbl) lbl.click();
+                                else inp.click();
+                                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                            }, cb);
                         }
                     }
                 }
@@ -1261,7 +1291,7 @@ const run = async () => {
                         await new Promise(r => setTimeout(r, 1000 + Math.random() * 500));
 
                         // Skip if already applied
-                        const appliedBadge = await page.$('.artdeco-inline-feedback--success');
+                        const appliedBadge = await jobsList[i].$('.artdeco-inline-feedback--success');
                         if (appliedBadge) {
                             const badgeText = await page.evaluate(el => el.innerText, appliedBadge);
                             if (badgeText.includes('Applied')) {
@@ -1299,6 +1329,14 @@ const run = async () => {
                         const normalizedCompany = jobInfo.company.toLowerCase().trim();
                         if (restrictedCompanies.some(c => normalizedCompany.includes(c))) {
                             console.log(`  Skipping restricted company: ${jobInfo.company}`);
+                            continue;
+                        }
+
+                        // Check if Easy Apply button exists before doing anything else (tailoring, retries, etc.)
+                        const applyBtn = await page.$('.jobs-apply-button');
+                        if (!applyBtn) {
+                            console.log('  No Easy Apply button visible in pane. Skipping job.');
+                            failedJobs.push({ title: jobInfo.title, company: jobInfo.company, url: jobInfo.url, reason: 'No Easy Apply button' });
                             continue;
                         }
 
