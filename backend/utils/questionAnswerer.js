@@ -520,6 +520,9 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         !normalizedQ.includes('programming') &&
         !normalizedQ.includes('how many')
     ) {
+        if (normalizedQ.includes('scale of') || normalizedQ.includes('1 to 10') || normalizedQ.includes('out of 10')) {
+            return '10';
+        }
         const val = data['english'] ?? data['language'] ?? 'Professional / Fluent';
         return String(val);
     }
@@ -623,10 +626,11 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         return String(data['start date'] ?? '15 days');
     }
 
-    // ---------- Currently employed / working ----------
+    // ---------- Currently employed / working / currently work here ----------
     if (
         (normalizedQ.includes('currently') && normalizedQ.includes('employ')) ||
         (normalizedQ.includes('currently') && normalizedQ.includes('working')) ||
+        normalizedQ.includes('currently work here') ||
         normalizedQ.includes('current employment status') ||
         normalizedQ.includes('are you currently working')
     ) {
@@ -797,6 +801,11 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('permanent')
     ) {
         return String(data['job type'] ?? 'Full-time');
+    }
+
+    // ---------- Headline ----------
+    if (normalizedQ.includes('headline')) {
+        return String(data['headline'] ?? 'Full Stack Developer');
     }
 
     // ---------- Date of birth ----------
