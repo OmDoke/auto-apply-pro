@@ -9,6 +9,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [profile, setProfile] = useState<any>(null);
+  const [rawProfile, setRawProfile] = useState<any>(null);
   const [answers, setAnswers] = useState<Record<string, string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -28,15 +29,79 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       apiService.getProfile(),
       apiService.getAnswers()
     ]);
-    setProfile(profileData);
-    setAnswers(answersData);
+    
+    const p = profileData || {};
+    setRawProfile(p);
+    setProfile({
+      contact_info: {
+        first_name: p['first name'] || '',
+        last_name: p['last name'] || '',
+        email: p['email'] || '',
+        phone: p['phone'] || p['mobile'] || p['contact'] || '',
+        location: p['location'] || p['address'] || '',
+        linkedin: p['linkedin'] || '',
+        github: p['github'] || ''
+      },
+      experience: {
+        total_years: parseInt(p['years'] || p['experience'] || '0') || 0,
+        recent_role: p['job title'] || p['role'] || '',
+        recent_company: p['company'] || p['employer'] || '',
+        skills: (p['tech stack'] || p['skills'] || '').split(',').map((s: string) => s.trim()).filter(Boolean)
+      },
+      education: {
+        degree: p['degree'] || p['education'] || '',
+        major: p['major'] || '',
+        university: p['university'] || '',
+        graduation_year: p['graduation year'] || ''
+      },
+      salary_expectations: {
+        target: p['expected salary'] || '',
+        currency: p['currency'] || 'LPA'
+      },
+      preferences: {
+        willing_to_relocate: p['relocate'] === 'Yes'
+      }
+    });
+    setAnswers(answersData || {});
     setLoading(false);
   };
 
   const handleSave = async () => {
     setSaving(true);
+    const updatedRawProfile = {
+      ...rawProfile,
+      'first name': profile.contact_info.first_name,
+      'last name': profile.contact_info.last_name,
+      'email': profile.contact_info.email,
+      'phone': profile.contact_info.phone,
+      'mobile': profile.contact_info.phone,
+      'contact': profile.contact_info.phone,
+      'location': profile.contact_info.location,
+      'address': profile.contact_info.location,
+      'linkedin': profile.contact_info.linkedin,
+      'github': profile.contact_info.github,
+      
+      'years': profile.experience.total_years.toString(),
+      'experience': profile.experience.total_years.toString(),
+      'job title': profile.experience.recent_role,
+      'role': profile.experience.recent_role,
+      'company': profile.experience.recent_company,
+      'employer': profile.experience.recent_company,
+      'tech stack': profile.experience.skills.join(', '),
+      
+      'degree': profile.education.degree,
+      'education': profile.education.degree,
+      'major': profile.education.major,
+      'university': profile.education.university,
+      'graduation year': profile.education.graduation_year,
+      
+      'expected salary': profile.salary_expectations.target,
+      'currency': profile.salary_expectations.currency,
+      'relocate': profile.preferences.willing_to_relocate ? 'Yes' : 'No'
+    };
+
     const results = await Promise.all([
-      apiService.updateProfile(profile),
+      apiService.updateProfile(updatedRawProfile),
       apiService.updateAnswers(answers)
     ]);
     setSaving(false);

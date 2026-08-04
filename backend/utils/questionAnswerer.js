@@ -1460,21 +1460,6 @@ const getAnswer = async (questionText, userData, context = {}) => {
     const staticAnswer = getStaticAnswer(normalized, userData, context);
     if (staticAnswer !== null) return staticAnswer;
 
-    // ── Step 2: Direct answers.json lookup (for novel questions not covered by rules) ──
-    const directAnswer = getDirectAnswer(normalized, userData);
-    if (directAnswer !== null) {
-        if (context.options && context.options.length > 0) {
-            const lowerOpts = context.options.map(o => o.toLowerCase());
-            const directLower = directAnswer.toLowerCase();
-            const isYesNo = lowerOpts.includes('yes') && lowerOpts.includes('no') && context.options.length <= 3;
-            if (!isYesNo || lowerOpts.includes(directLower)) {
-                return directAnswer;
-            }
-        } else {
-            return directAnswer;
-        }
-    }
-
     // ── Step 3: LLM — only for truly open-ended questions not handled by rules ──
     if (llmFirst || isDynamicQuestion) {
         const aiAnswer = await getAIAnswer(questionText, context, userData);
