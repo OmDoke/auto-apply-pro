@@ -1092,12 +1092,18 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
             console.log('  Submitting application...');
             await btnToClick.click();
             console.log(`  ⏱  Submit click took ${elapsed(submitStart)}`);
-            // await new Promise(r => setTimeout(r, 50));
+            
+            // Wait up to 3s for success modal
+            await new Promise(r => setTimeout(r, 3000));
+            
             applicationSubmitted = true;
             clicked = true;
 
             const dismissBtn = await page.$('button[aria-label="Dismiss"]');
-            if (dismissBtn) await dismissBtn.click();
+            if (dismissBtn) {
+                await dismissBtn.click();
+                await new Promise(r => setTimeout(r, 1000));
+            }
 
         } else if (reviewBtn) {
             btnToClick = reviewBtn.btn;
@@ -1155,6 +1161,22 @@ const attemptApply = async (page, jobInfo, attemptNum, answers = {}) => {
         }
 
         if (!clicked && !applicationSubmitted) {
+            // Check if it's the success modal
+            const isSuccess = await page.evaluate(() => {
+                const text = document.body.innerText || '';
+                return text.includes('Your application was sent to');
+            });
+            if (isSuccess) {
+                console.log('  Success modal detected. Application was submitted successfully.');
+                applicationSubmitted = true;
+                const dismissBtn = await page.$('button[aria-label="Dismiss"]');
+                if (dismissBtn) {
+                    await dismissBtn.click();
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+                break;
+            }
+
             console.log('  Could not find Next/Submit button on this step.');
             await screenshotOnFailure(page, 'no-button');
             return 'failed';
