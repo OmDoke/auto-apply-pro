@@ -25,11 +25,14 @@ You are an expert resume writer and ATS optimization specialist.
 Your goal is to tailor the following Base Resume Data to PERFECTLY match the provided Job Description (JD) to achieve a 100% ATS score.
 
 INSTRUCTIONS:
-1. Extract the most critical keywords and skills from the JD.
+1. Extract the most critical keywords, skills, and action verbs from the JD.
 2. Naturally integrate these keywords into the "summary", "skills", "experience", and "projects" sections of the Base Resume Data.
-3. Re-frame or slightly rewrite the bullet points so they directly address the JD's requirements, while remaining truthful to the candidate's actual experience.
-4. Return the result EXACTLY as a valid JSON object matching the EXACT structure of the Base Resume Data. 
-5. Do NOT include any markdown formatting (like \`\`\`json) or conversational text. Output ONLY the raw, parsable JSON string.
+3. Explicitly mirror the exact action verbs used in the JD when rewriting bullet points.
+4. Emphasize and quantify achievements (e.g., "% increase", "N+ users") where supported by the base data.
+5. Re-order the skills array and bullet points so the most relevant items to the JD appear first.
+6. Ensure all rewritten bullets strictly follow the STAR method and are kept under 2 lines.
+7. Return the result EXACTLY as a valid JSON object matching the EXACT structure of the Base Resume Data. 
+8. Do NOT include any markdown formatting (like \`\`\`json) or conversational text. Output ONLY the raw, parsable JSON string.
 
 Base Resume Data:
 {baseData}
