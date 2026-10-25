@@ -1,9 +1,14 @@
-# Tasks
-- `[x]` Create base `resumeData.js`
-- `[x]` Export LLM utilities in `resumeQA.js`
-- `[x]` Implement `resumeGenerator.js`
-- `[x]` Modify `linkedinAgent.js` to extract JD and call generator
-- `[x]` Verify functionality
-- `[x]` Fix `deepseek-r1-distill-llama-70b` decommissioned error using `llama-3.3-70b-versatile`
-- `[x]` Update prompt for explicit ATS keywords optimization
-- `[x]` Fix LinkedIn agent to strictly wait for PDF upload to process and prevent it from silently falling back to selecting old resumes
+# Task Tracker — Steps 1-4
+| # | Task | Status |
+|---|---|---|
+| 1 | Install @google/generative-ai | done |
+| 2 | Add GEMINI_API_KEY to .env | done |
+| 3 | Create geminiClient.js | done |
+| 4 | Create jobMatcher.js | done |
+| 5 | Expand Preferences type | done |
+| 6 | Add Settings Panel UI | done |
+| 7 | Pass prefs in sequentialController.js | done |
+| 8 | Wire shouldApplyToJob() into linkedinAgent.js | done |
+| 9 | Move resume tailoring before apply | done |
+| 10 | Add Gemini fallback to resumeGenerator.js | done |
+| 11 | Verify end-to-end | done |

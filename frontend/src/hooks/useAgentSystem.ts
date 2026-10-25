@@ -10,7 +10,16 @@ export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: s
     logs: []
   });
 
-  const [prefs, setPrefs] = useState<Preferences>({ jobTitle: 'Software Engineer', location: 'Pune' });
+  const [prefs, setPrefs] = useState<Preferences>({
+    jobTitle:         'Software Engineer',
+    location:         'Pune',
+    skills:           'React, TypeScript, Node.js',
+    excludeCompanies: 'HT Media',
+    excludeKeywords:  'Senior, Lead, 10+ years, US Citizen only',
+    minMatchScore:    60,
+    jobType:          'any',
+    workMode:         'any',
+  });
   const [failedCount, setFailedCount] = useState(0);
   const [socket, setSocket] = useState<Socket | null>(null);
 

@@ -278,3 +278,22 @@ describe('getAnswer — new bug fixes and edge cases', () => {
         });
     });
 });
+
+describe('getAnswer — strict mode (LinkedIn)', () => {
+    const felony = 'Have you ever been convicted of a felony?';
+
+    test('non-strict keeps the legacy default Yes for unknown yes/no questions', async () => {
+        const answer = await getAnswer(felony, sampleUser, { type: 'radio', options: ['Yes', 'No'] });
+        expect(answer).toBe('Yes');
+    });
+
+    test('strict returns null instead of guessing Yes', async () => {
+        const answer = await getAnswer(felony, sampleUser, { type: 'radio', options: ['Yes', 'No'], strict: true });
+        expect(answer).toBeNull();
+    });
+
+    test('strict still answers consent questions', async () => {
+        const answer = await getAnswer('I agree to the privacy policy', sampleUser, { type: 'radio', options: ['Yes', 'No'], strict: true });
+        expect(answer).toBe('Yes');
+    });
+});

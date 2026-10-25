@@ -5,6 +5,8 @@ const { EventEmitter } = require('events');
 const engineEvents = new EventEmitter();
 
 let activeProcesses = [];
+// Set by stopSequence so a gracefully-stopped agent (exit 0) doesn't start the next one
+let stopRequested = false;
 const MAX_LOG_ENTRIES = 500;
 
 let currentState = {
@@ -41,8 +43,14 @@ const runAgent = async (agentName, scriptPath, prefs = {}) => {
         // Pass frontend preferences to child processes so they can override .env
         const env = { 
             ...process.env,
-            FRONTEND_JOB_TITLE: prefs.jobTitle || '',
-            FRONTEND_LOCATION: prefs.location || ''
+            FRONTEND_JOB_TITLE:          prefs.jobTitle          || '',
+            FRONTEND_LOCATION:           prefs.location          || '',
+            FRONTEND_SKILLS:             prefs.skills            || '',
+            FRONTEND_EXCLUDE_COMPANIES:  prefs.excludeCompanies  || '',
+            FRONTEND_EXCLUDE_KEYWORDS:   prefs.excludeKeywords   || '',
+            FRONTEND_MIN_MATCH_SCORE:    String(prefs.minMatchScore ?? 60),
+            FRONTEND_JOB_TYPE:           prefs.jobType           || 'any',
+            FRONTEND_WORK_MODE:          prefs.workMode          || 'any',
         };
 
         const childProcess = fork(scriptPath, [], { 
@@ -52,11 +60,25 @@ const runAgent = async (agentName, scriptPath, prefs = {}) => {
         
         activeProcesses.push(childProcess);
 
+        // Agents that announce ipcOutcomes report applications over IPC instead of log text
+        let countsViaIpc = false;
+        childProcess.on('message', (msg) => {
+            if (!msg || typeof msg !== 'object') return;
+            if (msg.type === 'ready' && msg.ipcOutcomes) {
+                countsViaIpc = true;
+                childProcess.supportsIpcStop = true;
+            }
+            if (msg.type === 'outcome' && msg.status === 'applied') {
+                currentState.appliedCount += 1;
+                setStatus(currentState.status, currentState.currentAgent);
+            }
+        });
+
         childProcess.stdout.on('data', (data) => {
             const lines = data.toString().split('\n').filter(line => line.trim() !== '');
             lines.forEach(line => {
                 // Intercept applied messages to increment count
-                if (line.includes('✅ Application submitted for:') || line.includes('✓ Applied!')) {
+                if (!countsViaIpc && (line.includes('✅ Application submitted for:') || line.includes('✓ Applied!'))) {
                     currentState.appliedCount += 1;
                     setStatus(currentState.status, currentState.currentAgent);
                 }
@@ -71,7 +93,9 @@ const runAgent = async (agentName, scriptPath, prefs = {}) => {
 
         childProcess.on('close', (code) => {
             activeProcesses = activeProcesses.filter(p => p !== childProcess);
-            if (code === 0) {
+            if (stopRequested) {
+                reject(new Error(`${agentName} stopped by user`));
+            } else if (code === 0) {
                 addLog(`✓ ${agentName} completed successfully.`);
                 currentState.lastRunTimes[agentName] = new Date().toISOString();
                 setStatus(currentState.status, currentState.currentAgent); // Trigger state update
@@ -90,6 +114,7 @@ const runSequence = async (prefs = {}) => {
         return;
     }
 
+    stopRequested = false;
     setStatus('Running', 'LinkedIn Agent');
     addLog('─────────────────────────────────────────────────');
     addLog('--- Starting Universal Job Agent Sequence ---');
@@ -106,6 +131,7 @@ const runSequence = async (prefs = {}) => {
         setStatus('Success');
         addLog('--- Sequence Completed Successfully ---');
     } catch (error) {
+        if (stopRequested) return; // stopSequence already set Idle
         setStatus('Failed');
         addLog(`--- Sequence Failed: ${error.message} ---`);
     }
@@ -118,6 +144,7 @@ const runSingleAgent = async (agentId, prefs = {}) => {
     }
 
     addLog('─────────────────────────────────────────────────');
+    stopRequested = false;
     addLog(`--- Starting Single Agent: ${agentId} ---`);
 
     try {
@@ -153,7 +180,16 @@ const runSingleAgent = async (agentId, prefs = {}) => {
 const stopSequence = () => {
     if (activeProcesses.length > 0) {
         addLog('Interrupting process...');
-        activeProcesses.forEach(p => { try { p.kill('SIGINT'); } catch (_) {} });
+        stopRequested = true;
+        // Ask for a graceful stop over IPC (SIGINT can't be handled on Windows),
+        // then force-kill anything still running after 15s
+        activeProcesses.forEach(p => {
+            try {
+                if (p.supportsIpcStop && p.connected) p.send({ type: 'stop' });
+                else p.kill('SIGINT');
+            } catch (_) {}
+            setTimeout(() => { if (p.exitCode === null && p.signalCode === null) { try { p.kill(); } catch (_) {} } }, 15000);
+        });
         activeProcesses = [];
     }
     setStatus('Idle');

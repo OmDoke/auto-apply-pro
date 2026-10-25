@@ -10,6 +10,7 @@
     "test-qa": "node test-qa.js"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "auto-apply-pro": "file:..",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

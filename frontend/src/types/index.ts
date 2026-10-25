@@ -30,8 +30,14 @@ export interface HiringPost {
 }
 
 export interface Preferences {
-  jobTitle: string;
-  location: string;
+  jobTitle:         string;
+  location:         string;
+  skills:           string;   // comma-separated: "React, TypeScript, Node.js"
+  excludeCompanies: string;   // comma-separated: "HT Media, NIIT"
+  excludeKeywords:  string;   // comma-separated: "Senior, Lead, 10+ years"
+  minMatchScore:    number;   // 0-100; 0 = scoring disabled (apply all)
+  jobType:          'full-time' | 'internship' | 'contract' | 'any';
+  workMode:         'remote' | 'hybrid' | 'onsite' | 'any';
 }
 
 export const agents: { id: string; name: string; desc: string; stub?: boolean }[] = [

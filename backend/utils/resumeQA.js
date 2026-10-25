@@ -47,7 +47,7 @@ const logQA = (message) => {
     } catch (e) {}
 };
 const getLLMClient = () => {
-    const modelName = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+    const modelName = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
     if (!_llmClient || _llmModel !== modelName) {
         _llmClient = new ChatGroq({
             apiKey: process.env.GROQ_API_KEY,

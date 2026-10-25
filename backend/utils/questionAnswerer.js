@@ -1490,7 +1490,8 @@ const getAnswer = async (questionText, userData, context = {}) => {
         context.options.map(o => o.toLowerCase()).includes('no') &&
         context.options.length <= 3;
 
-    if (isYesNo || hasYesNoOptions) return 'Yes';
+    // context.strict (LinkedIn): never guess — unknown yes/no questions go to manual review
+    if ((isYesNo || hasYesNoOptions) && !context.strict) return 'Yes';
 
     return null;
 };

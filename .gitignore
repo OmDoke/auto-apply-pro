@@ -179,7 +179,6 @@ backend/test-pdf-out.txt
 
 # AI agent tooling (not part of the deployable app)
 .agent/
-.env.example
 
 # ── Scratch / one-off dev scripts ──────────────────────────────────────────
 scratch/
