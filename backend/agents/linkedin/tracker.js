@@ -60,6 +60,13 @@ const appliedTodayCount = () => {
         .length;
 };
 
+// Dashboard counter: confirmed LinkedIn applications, all-time and today
+const appliedCounts = () => ({
+    total: readJson(cfg.appliedJobsPath).filter(isLinkedInEntry).length,
+    today: appliedTodayCount(),
+    dailyLimit: cfg.dailyLimit,
+});
+
 // failed_jobs.json feeds the Manual Review page — keep its {title, company, url, reason} shape
 const appendFailedJob = ({ jobId, title, company, url, reason }) => {
     try {
@@ -119,6 +126,7 @@ module.exports = {
     jobViewUrl,
     recordAppliedJob,
     appliedTodayCount,
+    appliedCounts,
     appendFailedJob,
     recordOutcome,
     logUnanswered,

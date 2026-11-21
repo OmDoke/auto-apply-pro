@@ -107,6 +107,11 @@ router.get('/failed-jobs', async (req, res) => {
     }
 });
 
+// Successful (LinkedIn-confirmed) LinkedIn applications only
+router.get('/linkedin-applied', (req, res) => {
+    res.json(require('../agents/linkedin/tracker').appliedCounts());
+});
+
 router.delete('/failed-jobs', (req, res) => {
     const failedJobsPath = path.join(__dirname, '..', 'data', 'failed_jobs.json');
     fs.writeFileSync(failedJobsPath, '[]');

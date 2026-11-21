@@ -1,7 +1,16 @@
 import axios from 'axios';
-import { FailedJob, HiringPost, API_BASE } from '../types';
+import { FailedJob, HiringPost, LinkedInAppliedCounts, API_BASE } from '../types';
 
 export const apiService = {
+  getLinkedInApplied: async (): Promise<LinkedInAppliedCounts | null> => {
+    try {
+      const res = await axios.get(`${API_BASE}/linkedin-applied`);
+      return res.data;
+    } catch {
+      return null;
+    }
+  },
+
   getFailedJobs: async (): Promise<FailedJob[]> => {
     try {
       const res = await axios.get(`${API_BASE}/failed-jobs`);

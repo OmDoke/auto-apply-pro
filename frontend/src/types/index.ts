@@ -8,6 +8,12 @@ export interface SystemState {
   lastRunTimes?: Record<string, string>;
 }
 
+export interface LinkedInAppliedCounts {
+  total: number;
+  today: number;
+  dailyLimit: number;
+}
+
 export interface FailedJob {
   title: string;
   company: string;

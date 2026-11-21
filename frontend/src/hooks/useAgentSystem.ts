@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SystemState, Preferences, SOCKET_URL } from '../types';
+import { SystemState, Preferences, LinkedInAppliedCounts, SOCKET_URL } from '../types';
 import { apiService } from '../services/api';
 
 const PREFS_STORAGE_KEY = 'agentPrefs';
@@ -38,6 +38,7 @@ export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: s
     } catch { /* storage unavailable — prefs just won't persist */ }
   }, [prefs]);
   const [failedCount, setFailedCount] = useState(0);
+  const [linkedInApplied, setLinkedInApplied] = useState<LinkedInAppliedCounts | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
 
   const fetchFailedCount = useCallback(async () => {
@@ -45,8 +46,14 @@ export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: s
     setFailedCount(jobs.length);
   }, []);
 
+  const fetchLinkedInApplied = useCallback(async () => {
+    const counts = await apiService.getLinkedInApplied();
+    if (counts) setLinkedInApplied(counts);
+  }, []);
+
   useEffect(() => {
     fetchFailedCount();
+    fetchLinkedInApplied();
     
     const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
@@ -55,6 +62,7 @@ export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: s
       setState(newStatus);
       if (newStatus.status === 'Success' || newStatus.status === 'Failed') {
         fetchFailedCount();
+        fetchLinkedInApplied();
       }
     });
 
@@ -67,6 +75,8 @@ export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: s
       // Trigger toasts for important events
       if (logMessage.includes('✅ Application submitted') || logMessage.includes('✓ Applied!')) {
         addToast('success', logMessage);
+        // LinkedIn agent logs "✓ Applied!" right after recording the job — refresh the counter live
+        if (logMessage.includes('✓ Applied!')) fetchLinkedInApplied();
       } else if (logMessage.includes('[ERROR]') || logMessage.includes('Fatal') || logMessage.includes('✗')) {
         addToast('error', logMessage);
       } else if (logMessage.includes('Starting Single Agent') || logMessage.includes('Starting Universal Job Agent')) {
@@ -77,7 +87,7 @@ export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: s
     return () => {
       newSocket.disconnect();
     };
-  }, [fetchFailedCount]);
+  }, [fetchFailedCount, fetchLinkedInApplied]);
 
   const handleStartAll = useCallback(() => {
     if (state.status === 'Running') return;
@@ -98,6 +108,7 @@ export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: s
     prefs,
     setPrefs,
     failedCount,
+    linkedInApplied,
     handleStartAll,
     handleStartAgent,
     handleStop,

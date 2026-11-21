@@ -1,5 +1,6 @@
 import React from 'react';
-import { Activity, CheckCircle2, AlertTriangle, Briefcase } from 'lucide-react';
+import { Activity, CheckCircle2, AlertTriangle, Briefcase, Linkedin } from 'lucide-react';
+import { LinkedInAppliedCounts } from '../types';
 
 interface StatCardProps {
   icon: React.ElementType;
@@ -30,6 +31,7 @@ interface StatCardsProps {
   totalActive: number;
   failedCount: number;
   logCount: number;
+  linkedInApplied: LinkedInAppliedCounts | null;
   isRunning: boolean;
 }
 
@@ -39,11 +41,20 @@ export function StatCards({
   completedCount, 
   totalActive, 
   failedCount, 
-  logCount, 
-  isRunning 
+  logCount,
+  linkedInApplied,
+  isRunning
 }: StatCardsProps) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+      <StatCard
+        icon={Linkedin}
+        label="LinkedIn Applied"
+        value={linkedInApplied ? linkedInApplied.total : '–'}
+        sub={linkedInApplied ? `${linkedInApplied.today}/${linkedInApplied.dailyLimit} today · confirmed only` : 'Backend offline'}
+        color="bg-sky-500/15 text-sky-400"
+        delay={0}
+      />
       <StatCard 
         icon={Activity}       
         label="Active Agents"  

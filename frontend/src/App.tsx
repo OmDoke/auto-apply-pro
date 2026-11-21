@@ -47,6 +47,7 @@ function App() {
         prefs={sys.prefs}
         setPrefs={sys.setPrefs}
         failedCount={sys.failedCount}
+        linkedInApplied={sys.linkedInApplied}
         handleStartAll={sys.handleStartAll}
         handleStartAgent={sys.handleStartAgent}
         handleStop={sys.handleStop}

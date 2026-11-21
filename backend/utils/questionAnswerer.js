@@ -1414,6 +1414,14 @@ const getAnswer = async (questionText, userData, context = {}) => {
     // ── Step 0: Direct answers.json lookup (fastest, zero LLM tokens) ──
     // Check before anything else — if the question or a close variant is already in
     // answers.json, return it instantly without touching LLM or heavy rule chains.
+    // ── Work authorization with descriptive options (not Yes/No): pick the unrestricted / citizen one ──
+    if (/work authori[sz]ation|authori[sz]ed to work|legal right to work|right to work/.test(normalized) &&
+        (context.options || []).length > 0 && !context.options.some(o => /^(yes|no)$/i.test(o.trim()))) {
+        const unrestricted = context.options.find(o =>
+            /without any restriction|citizen|no (employer )?sponsorship required|now and in the future, no/i.test(o));
+        if (unrestricted) return unrestricted;
+    }
+
     let directAnswer = getDirectAnswer(normalized, userData);
     // answers.json salaries are in LPA — scale to rupees when the question asks "in INR" (same as the rule engine)
     if (directAnswer !== null && /salary|ctc|compensation|package|stipend/.test(normalized) &&

@@ -4,7 +4,7 @@ import {
   ChevronDown, ChevronUp, Sliders, Target,
   BriefcaseBusiness, Wifi, XCircle,
 } from 'lucide-react';
-import { SystemState, Preferences, agents } from '../types';
+import { SystemState, Preferences, LinkedInAppliedCounts, agents } from '../types';
 import { apiService } from '../services/api';
 import { Sidebar } from './Sidebar';
 import { StatCards } from './StatCards';
@@ -16,6 +16,7 @@ interface DashboardProps {
   prefs: Preferences;
   setPrefs: (p: Preferences) => void;
   failedCount: number;
+  linkedInApplied: LinkedInAppliedCounts | null;
   handleStartAll: () => void;
   handleStartAgent: (id: string) => void;
   handleStop: () => void;
@@ -26,7 +27,7 @@ interface DashboardProps {
 
 // ── Main Dashboard ────────────────────────────────────────────────────────
 export default function AgentDashboard({
-  state, prefs, setPrefs, failedCount,
+  state, prefs, setPrefs, failedCount, linkedInApplied,
   handleStartAll, handleStartAgent, handleStop,
   onShowManualReview, onShowHiringPosts, onShowSettings,
 }: DashboardProps) {
@@ -287,6 +288,7 @@ export default function AgentDashboard({
             totalActive={totalActive}
             failedCount={failedCount}
             logCount={state.appliedCount || 0}
+            linkedInApplied={linkedInApplied}
             isRunning={isRunning}
           />
 
