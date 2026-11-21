@@ -4,7 +4,7 @@ const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const cfg = require('./linkedin/config');
 const tracker = require('./linkedin/tracker');
-const { attemptApply, discardModal } = require('./linkedin/applyFlow');
+const { attemptApply, discardModal, findEasyApplyButton, installPageHelpers } = require('./linkedin/applyFlow');
 const { sleep, randInt } = require('./linkedin/formFields');
 const { shouldApplyToJob } = require('../utils/jobMatcher');
 const { getResumeText }    = require('../utils/resumeQA');
@@ -47,46 +47,153 @@ const searchUrlFor = (title) =>
     `&location=${encodeURIComponent(cfg.location)}&f_AL=true&f_E=${encodeURIComponent(cfg.experienceLevels)}`;
 
 // ---------------------------------------------------------------------------
-// Job card helpers
+// Search-page + job-page helpers
 // ---------------------------------------------------------------------------
-const readCardMeta = (card) => card.evaluate(el => {
-    const holder = el.closest('[data-occludable-job-id]');
-    const titleEl = el.querySelector('.job-card-list__title, .job-card-container__link, a[href*="/jobs/view/"]');
-    return {
-        jobId: el.getAttribute('data-job-id') || (holder && holder.getAttribute('data-occludable-job-id')) || null,
-        cardTitle: titleEl ? titleEl.innerText.trim().split('\n')[0] : '',
-    };
+// LinkedIn's job-list markup changes often, so we don't click cards. We collect job IDs from the
+// search page (links, data attributes, embedded JSON) and open each job directly at /jobs/view/<id>.
+const collectJobIds = (page) => page.evaluate(() => {
+    const ids = new Set();
+    const add = (v) => { if (v && /^\d{8,}$/.test(v)) ids.add(v); };
+    document.querySelectorAll('[data-occludable-job-id], [data-job-id]').forEach(el =>
+        add(el.getAttribute('data-occludable-job-id') || el.getAttribute('data-job-id')));
+    // New layout (/jobs/search-results/): <div role="button" componentkey="job-card-component-ref-<id>">
+    document.querySelectorAll('[componentkey^="job-card-component-ref-"]').forEach(el =>
+        add(el.getAttribute('componentkey').slice('job-card-component-ref-'.length)));
+    document.querySelectorAll('a[href*="/jobs/view/"], a[href*="currentJobId="]').forEach(a => {
+        const href = a.getAttribute('href') || '';
+        add((href.match(/\/jobs\/view\/(?:[^/?]*-)?(\d+)/) || href.match(/currentJobId=(\d+)/) || [])[1]);
+    });
+    const html = document.documentElement.innerHTML;
+    for (const m of html.matchAll(/(?:fsd_jobPosting|jobPosting|fs_normalized_jobPosting)[:%3A]+(\d{8,})/g)) add(m[1]);
+    return Array.from(ids);
 });
 
-// Wait until the details pane shows the clicked card (not the previous job)
-const waitForPane = (page, jobId, cardTitle) => page.waitForFunction((id, title) => {
-    const paneTitleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .t-24');
-    const paneTitle = paneTitleEl ? paneTitleEl.innerText.trim().toLowerCase() : '';
-    if (!paneTitle) return false;
-    const current = new URL(location.href).searchParams.get('currentJobId');
-    if (id && current === id) return true;
-    if (title) return paneTitle.includes(title.toLowerCase().slice(0, 25));
-    return !id;
-}, { timeout: 8000, polling: 200 }, jobId, cardTitle).then(() => true, () => false);
+// Scroll every scrollable container (the result list is lazy-loaded) so more jobs render
+const scrollResults = async (page) => {
+    for (let i = 0; i < 6; i++) {
+        await page.evaluate(() => {
+            window.scrollBy(0, 800);
+            document.querySelectorAll('*').forEach(el => {
+                if (el.scrollHeight > el.clientHeight + 50 && /auto|scroll/.test(getComputedStyle(el).overflowY)) el.scrollTop += 800;
+            });
+        });
+        await sleep(600);
+    }
+};
 
-const readJobPane = (page) => page.evaluate(() => {
-    const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, .t-24');
+// Wait until job IDs appear on the search page, scrolling to load the full list
+const waitForJobIds = async (page, timeout = 20000) => {
+    const end = Date.now() + timeout;
+    let ids = [];
+    while (Date.now() < end) {
+        ids = await collectJobIds(page).catch(() => []);
+        if (ids.length) break;
+        await sleep(1000);
+    }
+    if (!ids.length) return ids;
+    await scrollResults(page);
+    return collectJobIds(page).catch(() => ids);
+};
+
+// Save a screenshot + HTML and log what the page looks like, so new selectors can be found
+const dumpedPages = new Set();
+const dumpPage = async (page, label) => {
+    if (dumpedPages.has(label)) return; // one dump per kind per run
+    dumpedPages.add(label);
+    try {
+        const info = await page.evaluate(() => ({
+            url: location.href,
+            title: document.title,
+            h1: (document.querySelector('h1') || {}).innerText || null,
+            jobLinks: document.querySelectorAll('a[href*="/jobs/view/"], a[href*="currentJobId="]').length,
+            noResults: /no matching jobs|no results found|we couldn.t find/i.test(document.body.innerText || ''),
+            authwall: /authwall|login|checkpoint/i.test(location.pathname),
+        }));
+        console.log(`  Page diagnostics (${label}): ${JSON.stringify(info)}`);
+        fs.mkdirSync(cfg.screenshotDir, { recursive: true });
+        const base = path.join(cfg.screenshotDir, `debug-${label}-${Date.now()}`);
+        await page.screenshot({ path: `${base}.png`, fullPage: false });
+        fs.writeFileSync(`${base}.html`, await page.content());
+        console.log(`  Saved ${base}.png / .html — use these to update selectors.`);
+    } catch (e) {
+        console.log('  Could not save page diagnostics:', e.message);
+    }
+};
+
+// New search layout (/jobs/search-results/): cards carry no job ID, only the selected job's
+// currentJobId is in the URL. Click each card and read the ID from the URL.
+const harvestIdsByClicking = async (page, max = 30) => {
+    const count = await page.evaluate(() => {
+        document.querySelectorAll('[data-aa-card]').forEach(el => el.removeAttribute('data-aa-card'));
+        const cands = Array.from(document.querySelectorAll('main [role="button"], main a, main li, main [componentkey]'))
+            .filter(el => {
+                const t = el.innerText || '';
+                return /easy apply/i.test(t) && !/^\s*easy apply\s*$/i.test(t) && t.length < 800 && el.offsetParent !== null;
+            });
+        // keep the innermost card-sized element of each nested group
+        const cards = cands.filter(el => !cands.some(o => o !== el && el.contains(o)));
+        cards.forEach((el, i) => el.setAttribute('data-aa-card', String(i)));
+        return cards.length;
+    });
+    const ids = [];
+    for (let i = 0; i < Math.min(count, max); i++) {
+        const card = await page.$(`[data-aa-card="${i}"]`);
+        if (!card) continue;
+        const before = new URL(page.url()).searchParams.get('currentJobId');
+        await card.evaluate(el => el.scrollIntoView({ block: 'center' }));
+        await card.click().catch(() => card.evaluate(el => el.click()));
+        await page.waitForFunction((prev) => {
+            const id = new URL(location.href).searchParams.get('currentJobId');
+            return id && id !== prev;
+        }, { timeout: 4000, polling: 200 }, before).catch(() => {});
+        const id = new URL(page.url()).searchParams.get('currentJobId');
+        if (id && !ids.includes(id)) ids.push(id);
+        await sleep(300 + Math.random() * 300);
+    }
+    return ids;
+};
+
+const TITLE_SELECTOR = '.job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, .t-24, h1';
+
+// Wait until the job page has rendered (old title element, or the new layout's "About the job" / Easy Apply)
+const waitForJobPage = (page) => page.waitForFunction((sel) => {
+    const el = document.querySelector(sel);
+    if (el && el.innerText.trim()) return true;
+    return Array.from(document.querySelectorAll('h2, h3')).some(h => /about the job/i.test(h.innerText || '')) ||
+        !!document.querySelector('button[aria-label*="Easy Apply" i]');
+}, { timeout: 15000, polling: 300 }, TITLE_SELECTOR).then(() => true, () => false);
+
+const readJobPane = (page) => page.evaluate((titleSel) => {
+    // New layout uses hashed class names; document.title is "<Title> | <Company> | LinkedIn"
+    const parts = document.title.split(' | ').map(s => s.trim());
+    const fromTitle = parts.length >= 3 ? { title: parts[0], company: parts[1] } : {};
+
+    const titleEl = document.querySelector(titleSel);
     const companyEl =
         document.querySelector('.job-details-jobs-unified-top-card__company-name') ||
         document.querySelector('.jobs-unified-top-card__company-name') ||
         document.querySelector('.job-details-jobs-unified-top-card__primary-description a') ||
         document.querySelector('.job-details-jobs-unified-top-card__primary-description');
-    const jdEl = document.querySelector(
+    let jdEl = document.querySelector(
         '#job-details, .jobs-description__content, .jobs-description-content__text, ' +
         '.job-details-jobs-unified-top-card__job-description, article.jobs-description'
     );
+    if (!jdEl) {
+        // New layout: the expandable text box under the "About the job" heading
+        const h = Array.from(document.querySelectorAll('h2, h3')).find(e => /about the job/i.test(e.innerText || ''));
+        for (let p = h && h.parentElement; p && !jdEl; p = p.parentElement) {
+            jdEl = p.querySelector('[data-testid="expandable-text-box"]');
+        }
+    }
+    const company = companyEl ? companyEl.innerText.trim().split('\n')[0] : '';
     return {
-        title: titleEl ? titleEl.innerText.trim() : 'Unknown Job',
-        company: companyEl ? companyEl.innerText.trim() : 'Unknown Company',
+        title: (titleEl && titleEl.innerText.trim().split('\n')[0]) || fromTitle.title || 'Unknown Job',
+        company: company || fromTitle.company || 'Unknown Company',
         url: window.location.href,
-        jobDescription: jdEl ? (jdEl.innerText || jdEl.textContent).trim() : ''
+        // textContent includes the text hidden behind "… more"
+        jobDescription: jdEl ? (jdEl.textContent || jdEl.innerText).trim() : ''
     };
-});
+}, TITLE_SELECTOR);
 
 // No Easy Apply button: distinguish "already applied" from closed/external jobs
 const paneShowsApplied = (page) => page.evaluate(() => {
@@ -130,14 +237,26 @@ const run = async () => {
         launchOptions.args.push('--disable-blink-features=AutomationControlled');
         launchOptions.ignoreDefaultArgs = ['--enable-automation'];
     }
-    const browser = await puppeteer.launch(launchOptions);
+    // LINKEDIN_CDP_URL (e.g. http://localhost:9222) → attach to the user's own logged-in Chrome
+    // started with --remote-debugging-port, instead of launching a fresh profile
+    const browser = cfg.cdpUrl
+        ? await puppeteer.connect({ browserURL: cfg.cdpUrl, defaultViewport: null })
+        : await puppeteer.launch(launchOptions);
+    if (cfg.cdpUrl) console.log(`Attached to existing Chrome at ${cfg.cdpUrl}`);
+    let page;
+    // Never close the user's own browser — only our tab
+    const closeBrowser = async () => {
+        if (!cfg.cdpUrl) return browser.close();
+        if (page) await page.close().catch(() => {});
+        browser.disconnect();
+    };
 
     let stopped = false;
     const stop = async (why) => {
         if (stopped) return;
         stopped = true;
         console.log(`${why} Closing browser...`);
-        try { await browser.close(); } catch (_) {}
+        try { await closeBrowser(); } catch (_) {}
     };
     process.on('SIGINT', () => stop('Stop signal received.'));
     process.on('SIGTERM', () => stop('Stop signal received.'));
@@ -176,19 +295,22 @@ const run = async () => {
     };
 
     try {
-        const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
+        page = await browser.newPage();
+        await installPageHelpers(page);
+        if (!cfg.cdpUrl) await page.setViewport({ width: 1280, height: 800 });
 
         console.log('Navigating to LinkedIn Jobs...');
         await page.goto('https://www.linkedin.com/jobs/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         console.log('Checking authentication status...');
-        try {
-            await page.waitForSelector('#global-nav', { timeout: 10000 });
+        const loggedIn = async () => (await page.cookies('https://www.linkedin.com')).some(c => c.name === 'li_at') &&
+            !/login|authwall|checkpoint/i.test(new URL(page.url()).pathname);
+        if (await loggedIn()) {
             console.log('Successfully authenticated!');
-        } catch (e) {
-            console.log("Please log in manually if you haven't. Waiting 60 seconds...");
-            await new Promise(r => setTimeout(r, 60000));
+        } else {
+            console.log("Please log in manually if you haven't. Waiting up to 60 seconds...");
+            const end = Date.now() + 60000;
+            while (Date.now() < end && !(await loggedIn().catch(() => false))) await sleep(2000);
         }
 
         const resumeText = await getResumeText();
@@ -197,28 +319,28 @@ const run = async () => {
         console.log(`Excluded companies: [${screeningPrefs.excludeCompanies.join(', ')}] | keywords: [${screeningPrefs.excludeKeywords.join(', ')}]`);
         console.log(`Strict answers: ${cfg.strictAnswers} | Tailor resume: ${cfg.tailorResume} | Per-run cap: ${cfg.maxApplicationsPerRun}`);
 
-        // ── Process a single job card ───────────────────────────────────────
-        const processJob = async (card) => {
-            const meta = await readCardMeta(card);
-            let jobInfo = { jobId: meta.jobId, title: meta.cardTitle || 'Unknown Job', company: 'Unknown Company', url: page.url() };
+        // ── Process a single job (opened directly by ID) ────────────────────
+        const processJob = async (jobId) => {
+            const jobUrl = `https://www.linkedin.com/jobs/view/${jobId}/`;
+            let jobInfo = { jobId, title: 'Unknown Job', company: 'Unknown Company', url: jobUrl };
 
-            await page.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), card);
-            await sleep(400 + Math.random() * 300);
-            await card.click();
-
-            if (!(await waitForPane(page, meta.jobId, meta.cardTitle))) {
-                return finishJob(jobInfo, 'skipped', 'Job details pane did not load for this card');
+            // Hidden tabs are throttled hard by Chrome (timers, rendering) — keep ours in front
+            await page.bringToFront().catch(() => {});
+            await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            if (!(await waitForJobPage(page))) {
+                await dumpPage(page, 'job-page');
+                return finishJob(jobInfo, 'skipped', 'Job page did not load');
             }
-            await sleep(500 + Math.random() * 500); // let the description render
+            await sleep(1000 + Math.random() * 500); // let the description render
 
-            jobInfo = { ...jobInfo, ...(await readJobPane(page)) };
-            jobInfo.jobId = jobInfo.jobId || tracker.jobIdFromUrl(jobInfo.url);
+            jobInfo = { ...jobInfo, ...(await readJobPane(page)), jobId };
             console.log(`  Job: "${jobInfo.title}" at ${jobInfo.company} (id ${jobInfo.jobId})`);
 
             // Already-applied jobs have no Easy Apply button — LinkedIn is the source of truth
-            if (!(await page.$('.jobs-apply-button'))) {
-                const reason = (await paneShowsApplied(page)) ? 'Already applied (LinkedIn)' : 'No Easy Apply button (closed or external)';
-                return finishJob(jobInfo, 'skipped', reason);
+            if (!(await findEasyApplyButton(page))) {
+                const applied = await paneShowsApplied(page);
+                if (!applied) await dumpPage(page, 'no-easy-apply');
+                return finishJob(jobInfo, 'skipped', applied ? 'Already applied (LinkedIn)' : 'No Easy Apply button (closed or external)');
             }
 
             // ── Screening: rule filter (incl. excluded companies) + Gemini score ──
@@ -295,131 +417,48 @@ const run = async () => {
         };
 
         // ── Search each job title and walk its result pages ─────────────────
+        // Pages are loaded by URL (start=0,25,50…); jobs are opened directly, so no card clicking.
+        const seen = new Set();
         const searchTitle = async (title) => {
             console.log(`\nSearching for: ${title} in ${cfg.location}`);
             console.log(`Filters: Easy Apply ON | Experience levels (f_E): ${cfg.experienceLevels}`);
-            await page.goto(searchUrlFor(title), { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-            let currentPage = 1;
-            while (!stopped) {
-                try {
-                    await page.waitForSelector('.job-card-container', { timeout: 10000 });
-                } catch (e) {
-                    console.log(`No job cards found on page ${currentPage}.`);
+            for (let currentPage = 1; !stopped && currentPage <= cfg.maxSearchPages; currentPage++) {
+                const url = `${searchUrlFor(title)}&start=${(currentPage - 1) * 25}`;
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+                let ids = (await waitForJobIds(page)).filter(id => !seen.has(id));
+                if (ids.length < 3) {
+                    // New layout: only the selected job's ID is on the page — click the cards to get the rest
+                    const clicked = (await harvestIdsByClicking(page)).filter(id => !seen.has(id));
+                    ids = Array.from(new Set([...ids, ...clicked]));
+                    if (ids.length < 3) await dumpPage(page, 'search');
+                }
+                if (!ids.length) {
+                    console.log(`No new jobs found on page ${currentPage}. Done with "${title}".`);
                     break;
                 }
-                const jobCount = (await page.$$('.job-card-container')).length;
-                console.log(`Found ${jobCount} jobs on page ${currentPage}.`);
+                ids.forEach(id => seen.add(id));
+                console.log(`Found ${ids.length} jobs on page ${currentPage}.`);
 
-                for (let i = 0; i < jobCount && !stopped; i++) {
+                for (let i = 0; i < ids.length && !stopped; i++) {
                     const reason = limitReason();
                     if (reason) {
                         console.log(`\nReached ${reason}. Stopping.`);
                         stopped = true;
                         break;
                     }
-
-                    console.log(`Selecting job ${i + 1} on page ${currentPage}...`);
+                    console.log(`Opening job ${i + 1}/${ids.length} on page ${currentPage} (id ${ids[i]})...`);
                     try {
-                        const card = (await page.$$('.job-card-container'))[i];
-                        if (!card) continue;
-                        await processJob(card);
+                        await processJob(ids[i]);
                     } catch (e) {
                         if (stopped) break;
-                        console.log(`  Error processing job ${i + 1}:`, e.message);
-                        finishJob({ title: 'Unknown Job', company: 'Unknown Company', url: page.url(), jobId: tracker.jobIdFromUrl(page.url()) },
+                        console.log(`  Error processing job ${ids[i]}:`, e.message);
+                        finishJob({ title: 'Unknown Job', company: 'Unknown Company', url: page.url(), jobId: ids[i] },
                             'failed', `Exception: ${e.message}`);
-                        await discardModal(page);
+                        await discardModal(page).catch(() => {});
                     }
                 }
-
-                if (stopped) break;
-
-                // --- PAGINATE ---
-                console.log(`\nAttempting to go to page ${currentPage + 1}...`);
-                const firstCardId = await page.$eval('.job-card-container', el =>
-                    el.getAttribute('data-job-id') || el.innerText.slice(0, 80)).catch(() => null);
-                let clickedNext = false;
-
-                await page.evaluate(() => {
-                    const pagination = document.querySelector('.jobs-search-pagination, .artdeco-pagination, [data-test-pagination-page-btn]');
-                    if (pagination) pagination.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                });
-                await sleep(1000 + Math.random() * 500);
-
-                // Strategy 1: numbered page button
-                try {
-                    const paginationBtns = await page.$$('.artdeco-pagination__indicator--number button, [data-test-pagination-page-btn], .jobs-search-pagination__indicator-button');
-                    for (const btn of paginationBtns) {
-                        const label = await page.evaluate(el => (el.getAttribute('aria-label') || el.textContent || '').trim(), btn);
-                        if (label.includes(`Page ${currentPage + 1}`) || label === String(currentPage + 1)) {
-                            await page.evaluate(b => b.click(), btn);
-                            clickedNext = true;
-                            console.log(`  Strategy 1: clicked page ${currentPage + 1} button.`);
-                            break;
-                        }
-                    }
-                } catch (_) {}
-
-                // Strategy 2: Next arrow — only inside the pagination component
-                if (!clickedNext) {
-                    try {
-                        const nextBtn = await page.evaluateHandle(() => {
-                            const scope = document.querySelector('.jobs-search-pagination, .artdeco-pagination');
-                            if (!scope) return null;
-                            return Array.from(scope.querySelectorAll('button')).find(el => {
-                                const label = (el.getAttribute('aria-label') || '').toLowerCase();
-                                const text = (el.textContent || '').toLowerCase().trim();
-                                return label.includes('next') || text === 'next' || el.classList.contains('artdeco-pagination__button--next');
-                            }) || null;
-                        });
-                        const el = nextBtn.asElement();
-                        if (el) {
-                            const isDisabled = await page.evaluate(b => b.disabled || b.getAttribute('aria-disabled') === 'true', el);
-                            if (!isDisabled) {
-                                await page.evaluate(b => b.click(), el);
-                                clickedNext = true;
-                                console.log('  Strategy 2: clicked Next arrow button.');
-                            }
-                        }
-                    } catch (_) {}
-                }
-
-                // Strategy 3: URL navigation
-                if (!clickedNext) {
-                    try {
-                        const currentUrl = page.url();
-                        const nextStart = currentPage * 25;
-                        const nextUrl = currentUrl.includes('start=')
-                            ? currentUrl.replace(/start=\d+/, `start=${nextStart}`)
-                            : `${currentUrl}&start=${nextStart}`;
-                        console.log(`  Strategy 3: navigating via URL (start=${nextStart}).`);
-                        await page.goto(nextUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                        clickedNext = true;
-                    } catch (e) {
-                        console.log('  Strategy 3 failed:', e.message);
-                    }
-                }
-
-                if (!clickedNext) {
-                    console.log('All pagination strategies exhausted. No more pages.');
-                    break;
-                }
-
-                currentPage++;
-                console.log(`Waiting for page ${currentPage} to load...`);
-                // Wait until the card list actually changes (not the old page's cards)
-                const changed = await page.waitForFunction((prev) => {
-                    const el = document.querySelector('.job-card-container');
-                    if (!el) return false;
-                    return (el.getAttribute('data-job-id') || el.innerText.slice(0, 80)) !== prev;
-                }, { timeout: 15000, polling: 300 }, firstCardId).then(() => true, () => false);
-                if (!changed) {
-                    console.log(`Page ${currentPage} did not load new jobs. Done with "${title}".`);
-                    break;
-                }
-                await sleep(800);
-                console.log(`Page ${currentPage} loaded.`);
             }
         };
 
@@ -442,7 +481,7 @@ const run = async () => {
             process.exitCode = 1;
         }
     } finally {
-        try { await browser.close(); } catch (_) {}
+        try { await closeBrowser(); } catch (_) {}
     }
 };
 

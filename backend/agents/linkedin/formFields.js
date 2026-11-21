@@ -17,7 +17,11 @@ const GROUP_SELECTOR =
     '.jobs-easy-apply-form-element, ' +
     'fieldset.fb-form-element, ' +
     '.artdeco-form-item, ' +
-    '.artdeco-text-input--container';
+    '.artdeco-text-input--container, ' +
+    // New <dialog> layout: hashed classes; groups are componentkey wrappers or label + select pairs
+    'dialog[data-testid="dialog"] div[componentkey^="easyApplyFieldFocus"], ' +
+    'dialog[data-testid="dialog"] div:has(> label[for] + div > select), ' +
+    'dialog[data-testid="dialog"] fieldset';
 
 const CUSTOM_DROPDOWN_SELECTOR =
     'button[aria-haspopup="listbox"], ' +
@@ -88,7 +92,13 @@ const getOptionLabel = (page, input) => page.evaluate(inp => {
     const lbl = (inp.labels && inp.labels[0]) ||
         inp.closest('.fb-form-element__radio, .fb-form-element__checkbox, .artdeco-radio, .artdeco-checkbox, .jobs-easy-apply-form-element__radio')
             ?.querySelector('label');
-    return lbl ? lbl.innerText.trim() : (inp.value || '');
+    if (lbl && lbl.innerText.trim()) return lbl.innerText.trim();
+    // New layout: empty <label for>; option text is in a sibling <p> of the input's wrapper
+    const fieldCount = (el) => el.querySelectorAll('input:not([type="hidden"]), select, textarea').length;
+    for (let p = inp.parentElement, i = 0; p && i < 3 && fieldCount(p) === 1; p = p.parentElement, i++) {
+        if ((p.innerText || '').trim()) return p.innerText.trim();
+    }
+    return inp.getAttribute('aria-label') || inp.value || '';
 }, input);
 
 // Click the label of a radio/checkbox (React listens on the label), else the input
@@ -446,6 +456,8 @@ const isGroupEmpty = (page, idx) => page.evaluate((i) => {
     if (!g) return false;
     const radios = g.querySelectorAll('input[type="radio"]');
     if (radios.length) return !Array.from(radios).some(r => r.checked);
+    const checkboxes = g.querySelectorAll('input[type="checkbox"]');
+    if (checkboxes.length) return !Array.from(checkboxes).some(c => c.checked);
     const sel = g.querySelector('select');
     if (sel) {
         const opt = sel.options[sel.selectedIndex];
@@ -473,24 +485,38 @@ const fillFormFields = async (page, answers, answerCache = new Map()) => {
         return Array.from(document.querySelectorAll('[data-aagroup]')).map((g) => {
             const idx = parseInt(g.getAttribute('data-aagroup'), 10);
 
-            const labelEl =
-                g.querySelector('legend') ||
-                g.querySelector('[data-test-form-builder-radio-button-form-component__title]') ||
-                g.querySelector('[data-test-form-element-label]') ||
-                g.querySelector('.fb-dash-form-element__label') ||
-                g.querySelector('.fb-form-element-label') ||
-                g.querySelector('.artdeco-text-input__label') ||
-                g.querySelector('label') ||
-                g.querySelector('span.t-14') ||
-                g.querySelector('h3.t-14') ||
-                g.querySelector('.jobs-easy-apply-form-element span[aria-hidden="true"]') ||
-                g.querySelector('.jobs-easy-apply-form-section__grouping span.visually-hidden');
+            // New layout: a radio/checkbox group is "<p>question</p><fieldset>" inside the componentkey wrapper,
+            // which also matches GROUP_SELECTOR — skip the inner group when the outer one holds the same fields
+            const parentGroup = g.parentElement && g.parentElement.closest('[data-aagroup]');
+            const fieldCount = (el) => el.querySelectorAll('input:not([type="hidden"]), select, textarea').length;
+            if (parentGroup && fieldCount(parentGroup) === fieldCount(g)) return { idx, questionText: '' };
+
+            // First candidate with visible text (new layout radios carry empty <label for> elements)
+            const labelEl = [
+                g.querySelector('legend'),
+                g.querySelector('[data-test-form-builder-radio-button-form-component__title]'),
+                g.querySelector('[data-test-form-element-label]'),
+                g.querySelector('.fb-dash-form-element__label'),
+                g.querySelector('.fb-form-element-label'),
+                g.querySelector('.artdeco-text-input__label'),
+                ...g.querySelectorAll('label'),
+                g.querySelector(':scope > p'),
+                g.querySelector('span.t-14'),
+                g.querySelector('h3.t-14'),
+                g.querySelector('.jobs-easy-apply-form-element span[aria-hidden="true"]'),
+                g.querySelector('.jobs-easy-apply-form-section__grouping span.visually-hidden'),
+            ].find(el => el && (el.innerText || '').trim());
 
             const optionLabel = (inp) => {
                 const lbl = (inp.labels && inp.labels[0]) ||
                     inp.closest('.fb-form-element__radio, .fb-form-element__checkbox, .artdeco-radio, .artdeco-checkbox, .jobs-easy-apply-form-element__radio')
                         ?.querySelector('label');
-                return lbl ? lbl.innerText.trim() : (inp.value || '');
+                if (lbl && lbl.innerText.trim()) return lbl.innerText.trim();
+                // New layout: option text is in a sibling <p> of the input's wrapper
+                for (let p = inp.parentElement, i = 0; p && i < 3 && fieldCount(p) === 1; p = p.parentElement, i++) {
+                    if ((p.innerText || '').trim()) return p.innerText.trim();
+                }
+                return inp.getAttribute('aria-label') || inp.value || '';
             };
 
             let type = 'text';
@@ -498,6 +524,16 @@ const fillFormFields = async (page, answers, answerCache = new Map()) => {
             const selectEl = g.querySelector('select');
             const radioInputs = Array.from(g.querySelectorAll('input[type="radio"]'));
             const checkboxInputs = Array.from(g.querySelectorAll('input[type="checkbox"]'));
+
+            // New layout's resume picker is a radio fieldset of file names — handled by the resume step
+            if (radioInputs.length && radioInputs.every(r => /\.(pdf|docx?)$/i.test(r.getAttribute('aria-label') || ''))) {
+                return { idx, questionText: '' };
+            }
+
+            // New layout: additional-question inputs carry the question only in aria-label
+            const field = g.querySelector('input:not([type="hidden"]), select, textarea');
+            const questionText = labelEl ? labelEl.innerText.trim()
+                : ((field && field.getAttribute('aria-label')) || '').trim();
 
             if (selectEl) {
                 type = 'select';
@@ -516,8 +552,9 @@ const fillFormFields = async (page, answers, answerCache = new Map()) => {
                 type = 'custom-dropdown';
             }
 
-            const required = !!g.querySelector('[required], [aria-required="true"]');
-            return { idx, questionText: labelEl ? labelEl.innerText.trim() : '', type, options, required };
+            // New layout radios have no required attribute — only the "*" on the question
+            const required = !!g.querySelector('[required], [aria-required="true"]') || /\*\s*$/.test(questionText);
+            return { idx, questionText, type, options, required };
         }).filter(g => g.questionText !== '');
     }, CUSTOM_DROPDOWN_SELECTOR);
 

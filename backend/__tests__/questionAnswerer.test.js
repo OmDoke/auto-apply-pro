@@ -280,16 +280,26 @@ describe('getAnswer — new bug fixes and edge cases', () => {
 });
 
 describe('getAnswer — strict mode (LinkedIn)', () => {
-    const felony = 'Have you ever been convicted of a felony?';
+    const unknown = 'Do you own a motorcycle?';
 
     test('non-strict keeps the legacy default Yes for unknown yes/no questions', async () => {
-        const answer = await getAnswer(felony, sampleUser, { type: 'radio', options: ['Yes', 'No'] });
+        const answer = await getAnswer(unknown, sampleUser, { type: 'radio', options: ['Yes', 'No'] });
         expect(answer).toBe('Yes');
     });
 
     test('strict returns null instead of guessing Yes', async () => {
-        const answer = await getAnswer(felony, sampleUser, { type: 'radio', options: ['Yes', 'No'], strict: true });
+        const answer = await getAnswer(unknown, sampleUser, { type: 'radio', options: ['Yes', 'No'], strict: true });
         expect(answer).toBeNull();
+    });
+
+    test.each([
+        'Have you ever been convicted of a felony?',
+        'Are you currently bound by non-compete agreements with your current or previous employers?',
+        'Do you or a close family member have any financial interest in an Endava competitor, supplier, or client?',
+        'Do you have any personal or family relationships with employees, contractors, suppliers, or clients of Endava?',
+    ])('conflict/restriction question answers No: %s', async (q) => {
+        expect(await getAnswer(q, sampleUser, { type: 'radio', options: ['Yes', 'No'], strict: true })).toBe('No');
+        expect(await getAnswer(q, sampleUser, { type: 'radio', options: ['Yes', 'No'] })).toBe('No');
     });
 
     test('strict still answers consent questions', async () => {

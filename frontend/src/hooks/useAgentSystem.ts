@@ -3,6 +3,19 @@ import { io, Socket } from 'socket.io-client';
 import { SystemState, Preferences, SOCKET_URL } from '../types';
 import { apiService } from '../services/api';
 
+const PREFS_STORAGE_KEY = 'agentPrefs';
+
+const DEFAULT_PREFS: Preferences = {
+  jobTitle:         'Software Engineer',
+  location:         'Pune',
+  skills:           'React, TypeScript, Node.js',
+  excludeCompanies: 'HT Media',
+  excludeKeywords:  'Senior, Lead, 10+ years, US Citizen only',
+  minMatchScore:    60,
+  jobType:          'any',
+  workMode:         'any',
+};
+
 export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: string) => void) {
   const [state, setState] = useState<SystemState>({
     status: 'Idle',
@@ -10,16 +23,20 @@ export function useAgentSystem(addToast: (type: 'success'|'error'|'info', msg: s
     logs: []
   });
 
-  const [prefs, setPrefs] = useState<Preferences>({
-    jobTitle:         'Software Engineer',
-    location:         'Pune',
-    skills:           'React, TypeScript, Node.js',
-    excludeCompanies: 'HT Media',
-    excludeKeywords:  'Senior, Lead, 10+ years, US Citizen only',
-    minMatchScore:    60,
-    jobType:          'any',
-    workMode:         'any',
+  // Saved in localStorage so edits survive page reloads and `npm run dev` restarts
+  const [prefs, setPrefs] = useState<Preferences>(() => {
+    try {
+      const saved = localStorage.getItem(PREFS_STORAGE_KEY);
+      if (saved) return { ...DEFAULT_PREFS, ...JSON.parse(saved) };
+    } catch { /* storage unavailable or corrupt — use defaults */ }
+    return DEFAULT_PREFS;
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(prefs));
+    } catch { /* storage unavailable — prefs just won't persist */ }
+  }, [prefs]);
   const [failedCount, setFailedCount] = useState(0);
   const [socket, setSocket] = useState<Socket | null>(null);
 

@@ -10,6 +10,18 @@ const CHROME_PATHS = [
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
 ].filter(Boolean);
 
+// Chrome refuses remote debugging on the default profile, so use a dedicated one (log in to LinkedIn
+// there once). The throttling flags stop Chrome from freezing the agent's tab when the window is hidden.
+const CHROME_DEBUG_ARGS = [
+    '--remote-debugging-port=9222',
+    `--user-data-dir=${process.env.CHROME_DEBUG_PROFILE || 'C:\\chrome-debug'}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+];
+
 let chromeProcess = null;
 
 /**
@@ -27,11 +39,7 @@ async function launchChrome() {
     }
 
     try {
-        chromeProcess = spawn(chromePath, [
-            '--remote-debugging-port=9222',
-            '--no-first-run',
-            '--no-default-browser-check',
-        ], { detached: true, stdio: 'ignore' });
+        chromeProcess = spawn(chromePath, CHROME_DEBUG_ARGS, { detached: true, stdio: 'ignore' });
         
         chromeProcess.unref();
         console.log(`[ChromeService] Launched with remote debugging on port 9222 (pid ${chromeProcess.pid})`);
@@ -81,6 +89,7 @@ function stopChrome() {
 }
 
 module.exports = {
+    CHROME_DEBUG_ARGS,
     launchChrome,
     getChromeStatus,
     stopChrome

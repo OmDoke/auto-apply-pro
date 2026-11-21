@@ -5,6 +5,7 @@ const fs = require('fs');
 const http = require('http');
 const { spawn } = require('child_process');
 const { runSequence, runSingleAgent, stopSequence, getStatus } = require('../controller/sequentialController');
+const { CHROME_DEBUG_ARGS, getChromeStatus } = require('../services/chromeService');
 
 // ── Chrome launcher for Indeed Agent ──────────────────────────────────────────
 // Possible Chrome binary locations on Windows
@@ -16,20 +17,17 @@ const CHROME_PATHS = [
 
 let chromeProcess = null;
 
-router.post('/open-chrome', (req, res) => {
+router.post('/open-chrome', async (req, res) => {
     const chromePath = CHROME_PATHS.find(p => fs.existsSync(p));
     if (!chromePath) {
         return res.status(500).json({ ok: false, message: 'Chrome not found. Set CHROME_PATH in .env' });
     }
-    if (chromeProcess && !chromeProcess.killed) {
+    // Also covers a debug Chrome started by hand or before a backend restart
+    if ((chromeProcess && !chromeProcess.killed) || await getChromeStatus()) {
         return res.json({ ok: true, message: 'Chrome already running.' });
     }
     try {
-        chromeProcess = spawn(chromePath, [
-            '--remote-debugging-port=9222',
-            '--no-first-run',
-            '--no-default-browser-check',
-        ], { detached: true, stdio: 'ignore' });
+        chromeProcess = spawn(chromePath, CHROME_DEBUG_ARGS, { detached: true, stdio: 'ignore' });
         chromeProcess.unref();
         console.log(`[Chrome] Launched with remote debugging on port 9222 (pid ${chromeProcess.pid})`);
         res.json({ ok: true, message: `Chrome launched (pid ${chromeProcess.pid})` });
@@ -49,10 +47,8 @@ router.post('/open-url', (req, res) => {
     }
     try {
         // If we launch Chrome with the URL, it opens a new tab in the existing instance
-        const process = spawn(chromePath, [
-            '--remote-debugging-port=9222',
-            url
-        ], { detached: true, stdio: 'ignore' });
+        // Same args as the debug Chrome, so the URL opens as a tab in that instance
+        const process = spawn(chromePath, [...CHROME_DEBUG_ARGS, url], { detached: true, stdio: 'ignore' });
         process.unref();
         console.log(`[Chrome] Opened URL: ${url}`);
         res.json({ ok: true, message: `Opened ${url} in Chrome` });

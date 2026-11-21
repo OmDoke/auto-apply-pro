@@ -10,10 +10,87 @@ const path = require('path');
 const cfg = require('./config');
 const { fillFormFields, sleep } = require('./formFields');
 
-const MODAL_SELECTOR = '.jobs-easy-apply-modal, .artdeco-modal';
-const ERROR_SELECTOR = '.artdeco-inline-feedback--error';
+// Old layout: .jobs-easy-apply-modal / .artdeco-modal. New layout: <dialog data-testid="dialog">
+// with hashed classes, plain <footer> buttons and text progress ("25 percent complete", "1/4 pages").
+const MODAL_SELECTOR = '.jobs-easy-apply-modal, .artdeco-modal, dialog[data-testid="dialog"][open]';
+const ERROR_SELECTOR =
+    '.artdeco-inline-feedback--error, ' +
+    'dialog[data-testid="dialog"] [role="alert"], ' +
+    'dialog[data-testid="dialog"] [data-testid*="error" i], ' +
+    // New layout: "<p>Invalid input</p>" is a direct child of the helper text (the char counter is nested deeper)
+    'dialog[data-testid="dialog"] [data-testid$="helper-text"] > p, ' +
+    // New layout radio/checkbox groups: "<p>question</p><fieldset/><p>This field is required</p>"
+    'dialog[data-testid="dialog"] fieldset ~ p';
 
 const elapsed = (start) => `(${Date.now() - start}ms)`;
+
+// Helpers defined inside every page, so page.evaluate callbacks can share them
+const pageHelpers = () => {
+    window.__aaModal = () =>
+        document.querySelector('.jobs-easy-apply-modal') ||
+        document.querySelector('dialog[data-testid="dialog"][open]') ||
+        document.querySelector('.artdeco-modal');
+    // Signature of the current modal step: progress value + section heading
+    window.__aaStepSig = () => {
+        const m = window.__aaModal();
+        if (!m) return 'closed';
+        const progress = m.querySelector('progress, [role="progressbar"]');
+        let pv = progress ? (progress.value ?? progress.getAttribute('aria-valuenow') ?? '') : '';
+        if (!pv) {
+            const t = (m.innerText || '').match(/(\d+)\s*percent complete|(\d+\s*\/\s*\d+)\s*pages/i) || [];
+            pv = t[1] || t[2] || '';
+        }
+        // New layout: h2 is the constant "Apply to <company>"; the section title is the first <p>
+        const heading = m.querySelector('h3') || m.querySelector('[data-testid="lazy-column"] p') || m.querySelector('h2');
+        return `${pv}|${heading ? heading.innerText.trim() : ''}`;
+    };
+};
+
+const installPageHelpers = async (page) => {
+    await page.evaluateOnNewDocument(pageHelpers);
+    await page.evaluate(pageHelpers).catch(() => {});
+};
+
+const getModal = async (page) => {
+    const handle = await page.evaluateHandle(() => window.__aaModal());
+    const el = handle.asElement();
+    if (!el) await handle.dispose();
+    return el;
+};
+
+// Easy Apply button on the job page: old .jobs-apply-button, new button[aria-label="Easy Apply to this job"]
+const findEasyApplyButton = async (page, timeout = 5000) => {
+    const handle = await page.waitForFunction(() =>
+        Array.from(document.querySelectorAll('.jobs-apply-button, button[aria-label*="Easy Apply" i]'))
+            .find(b => b.offsetParent !== null && !b.disabled && !b.closest('dialog') &&
+                /easy apply/i.test(`${b.getAttribute('aria-label') || ''} ${b.innerText || ''}`)),
+    { timeout, polling: 250 }).catch(() => null);
+    const el = handle && handle.asElement();
+    if (handle && !el) await handle.dispose();
+    return el || null;
+};
+
+// New layout sometimes renders "No network connection" + Refresh inside the dialog.
+// Click Refresh a couple of times; returns false if the form never loads.
+const recoverModalNetworkError = async (page) => {
+    const hasError = () => page.evaluate(() => {
+        const m = window.__aaModal();
+        return !!m && /no network connection/i.test(m.innerText || '');
+    });
+    for (let i = 0; i < 2 && await hasError(); i++) {
+        console.log('  ⚠️ Easy Apply modal shows "No network connection" — clicking Refresh...');
+        await page.evaluate(() => {
+            const btn = Array.from(window.__aaModal().querySelectorAll('button'))
+                .find(b => /refresh/i.test(b.innerText || ''));
+            if (btn) btn.click();
+        });
+        await page.waitForFunction(() => {
+            const m = window.__aaModal();
+            return !m || !/no network connection/i.test(m.innerText || '');
+        }, { timeout: 8000, polling: 300 }).catch(() => {});
+    }
+    return !(await hasError());
+};
 
 const screenshotOnFailure = async (page, label) => {
     try {
@@ -31,19 +108,20 @@ const screenshotOnFailure = async (page, label) => {
 // Close the Easy Apply modal: Dismiss → wait for the confirm dialog → Discard
 const discardModal = async (page) => {
     try {
-        const dismissBtn = await page.$('button[aria-label="Dismiss"]');
+        const modal = await getModal(page);
+        const dismissBtn = (modal && await modal.$('button[aria-label="Dismiss"]')) || await page.$('button[aria-label="Dismiss"]');
         if (!dismissBtn) return;
         await dismissBtn.click();
         await page.waitForFunction(() =>
             Array.from(document.querySelectorAll('button')).some(b => (b.innerText || '').toLowerCase().includes('discard')) ||
-            !document.querySelector('.jobs-easy-apply-modal'),
+            !window.__aaModal(),
         { timeout: 3000 }).catch(() => {});
         await page.evaluate(() => {
             const btn = Array.from(document.querySelectorAll('button'))
                 .find(b => (b.innerText || '').toLowerCase().includes('discard'));
             if (btn) btn.click();
         });
-        await page.waitForFunction(() => !document.querySelector('.jobs-easy-apply-modal'), { timeout: 3000 }).catch(() => {});
+        await page.waitForFunction(() => !window.__aaModal(), { timeout: 3000 }).catch(() => {});
     } catch (_) { /* modal already gone */ }
 };
 
@@ -56,46 +134,31 @@ const waitForSpinner = async (page) => {
     } catch (_) { /* continue anyway */ }
 };
 
-// Signature of the current modal step: progress value + section heading
-const stepSignature = (page) => page.evaluate(() => {
-    const m = document.querySelector('.jobs-easy-apply-modal') || document.querySelector('.artdeco-modal');
-    if (!m) return 'closed';
-    const progress = m.querySelector('progress, [role="progressbar"]');
-    const pv = progress ? (progress.value ?? progress.getAttribute('aria-valuenow') ?? '') : '';
-    const heading = m.querySelector('h3, h2');
-    return `${pv}|${heading ? heading.innerText.trim() : ''}`;
-});
+const stepSignature = (page) => page.evaluate(() => window.__aaStepSig());
 
 // Click Next/Review and wait until the step changes or a validation error shows.
 // Returns true if the step advanced.
 const clickAndWaitForStep = async (page, btn) => {
     const before = await stepSignature(page);
     await btn.click();
-    await page.waitForFunction((prev, errSel) => {
-        const m = document.querySelector('.jobs-easy-apply-modal') || document.querySelector('.artdeco-modal');
-        let sig = 'closed';
-        if (m) {
-            const progress = m.querySelector('progress, [role="progressbar"]');
-            const pv = progress ? (progress.value ?? progress.getAttribute('aria-valuenow') ?? '') : '';
-            const heading = m.querySelector('h3, h2');
-            sig = `${pv}|${heading ? heading.innerText.trim() : ''}`;
-        }
-        return sig !== prev || !!document.querySelector(errSel);
-    }, { timeout: 8000, polling: 150 }, before, ERROR_SELECTOR).catch(() => {});
+    await page.waitForFunction((prev, errSel) =>
+        window.__aaStepSig() !== prev || Array.from(document.querySelectorAll(errSel)).some(el => el.offsetParent !== null && !/success/i.test(el.innerText || '')),
+    { timeout: 8000, polling: 150 }, before, ERROR_SELECTOR).catch(() => {});
     await waitForSpinner(page);
     return (await stepSignature(page)) !== before;
 };
 
+// New layout reuses the error slot for notices like "Resume uploaded successfully"
 const getVisibleErrors = (page) => page.evaluate((sel) =>
     Array.from(document.querySelectorAll(sel))
-        .filter(el => el.offsetParent !== null)
+        .filter(el => el.offsetParent !== null && !/success/i.test(el.innerText || ''))
         .map(el => el.innerText.trim()), ERROR_SELECTOR);
 
 // Primary action buttons inside the Easy Apply modal only
 const getActionButtons = async (page) => {
-    const modal = await page.$('.jobs-easy-apply-modal') || await page.$('.artdeco-modal');
+    const modal = await getModal(page);
     if (!modal) return [];
-    const handles = await modal.$$('.artdeco-button--primary');
+    const handles = await modal.$$('.artdeco-button--primary, footer button');
     const buttons = [];
     for (const btn of handles) {
         const text = await page.evaluate(el => el.textContent.trim().toLowerCase(), btn);
@@ -108,7 +171,17 @@ const getActionButtons = async (page) => {
 const untickFollowCompany = async (page) => {
     if (cfg.followCompany) return;
     await page.evaluate(() => {
-        const cb = document.querySelector('#follow-company-checkbox, input[id*="follow-company"]');
+        const m = window.__aaModal();
+        // New layout: empty <label for>; the "Follow <company>…" text sits next to the input's wrapper
+        const rowText = (c) => {
+            for (let p = c, i = 0; p && i < 4 && p.querySelectorAll('input').length <= 1; p = p.parentElement, i++) {
+                const t = (p.innerText || '').trim();
+                if (t) return t;
+            }
+            return c.getAttribute('aria-label') || '';
+        };
+        const cb = document.querySelector('#follow-company-checkbox, input[id*="follow-company"]') ||
+            (m && Array.from(m.querySelectorAll('input[type="checkbox"]')).find(c => /^follow\b/i.test(rowText(c))));
         if (cb && cb.checked) {
             const lbl = (cb.labels && cb.labels[0]) || document.querySelector(`label[for="${cb.id}"]`);
             (lbl || cb).click();
@@ -122,7 +195,7 @@ const untickFollowCompany = async (page) => {
 // ---------------------------------------------------------------------------
 const handleResumeStep = async (page, resumePath) => {
     if (fs.existsSync(resumePath)) {
-        const scope = await page.$('.jobs-easy-apply-modal') || page;
+        const scope = await getModal(page) || page;
         const fileInputs = await scope.$$('input[type="file"]');
         for (const input of fileInputs) {
             // Never put the resume into a cover-letter upload
@@ -147,8 +220,36 @@ const handleResumeStep = async (page, resumePath) => {
                 console.log('  Failed to upload resume:', err.message);
             }
         }
-        // No resume input on this step — try again on the next step
-        return false;
+        // New layout: no file input in the DOM — the "Upload resume" button opens a native file chooser
+        const uploadBtn = await page.evaluateHandle(() => {
+            const m = window.__aaModal();
+            return m && Array.from(m.querySelectorAll('button')).find(b => /^upload resume$/i.test((b.innerText || '').trim()));
+        });
+        const uploadEl = uploadBtn.asElement();
+        if (!uploadEl) {
+            await uploadBtn.dispose();
+            // No resume input on this step — try again on the next step
+            return false;
+        }
+        try {
+            const uploadStart = Date.now();
+            const [chooser] = await Promise.all([
+                page.waitForFileChooser({ timeout: 5000 }),
+                uploadEl.click(),
+            ]);
+            await chooser.accept([resumePath]);
+            // The uploaded file is added to the list and selected; wait until it shows up checked
+            await page.waitForFunction((name) => {
+                const m = window.__aaModal();
+                return !!m && Array.from(m.querySelectorAll('input[type="radio"]'))
+                    .some(r => r.checked && r.getAttribute('aria-label') === name);
+            }, { timeout: 15000, polling: 300 }, path.basename(resumePath)).catch(() => {});
+            console.log(`  ✔ Resume uploaded via file chooser: ${path.relative(cfg.dataDir, resumePath)} ${elapsed(uploadStart)}`);
+            return true;
+        } catch (err) {
+            console.log('  Failed to upload resume via file chooser:', err.message);
+            return false;
+        }
     }
 
     console.log(`  Resume not found at ${resumePath}.`);
@@ -183,7 +284,7 @@ const recoverLinkedInFormErrors = async (page, answers) => {
     try {
         const errorFields = await page.evaluate((errSel) => {
             return Array.from(document.querySelectorAll(errSel))
-                .filter(el => el.offsetParent !== null)
+                .filter(el => el.offsetParent !== null && !/success/i.test(el.innerText || ''))
                 .map(errEl => {
                     let container = errEl.parentElement;
                     for (let i = 0; i < 8 && container; i++) {
@@ -192,7 +293,7 @@ const recoverLinkedInFormErrors = async (page, answers) => {
                             const label = container.querySelector('label, legend, [class*="label"]');
                             return {
                                 errorText: errEl.innerText.trim(),
-                                labelText: label ? label.innerText.trim() : (inp.placeholder || inp.name || ''),
+                                labelText: label ? label.innerText.trim() : (inp.getAttribute('aria-label') || inp.placeholder || inp.name || ''),
                                 aagroup: container.getAttribute('data-aagroup') || null,
                             };
                         }
@@ -236,24 +337,39 @@ const recoverLinkedInFormErrors = async (page, answers) => {
 const confirmSubmission = async (page) => {
     await page.waitForFunction((errSel) =>
         /your application was sent|application was sent|application submitted/i.test(document.body.innerText || '') ||
-        !document.querySelector('.jobs-easy-apply-modal') ||
-        !!document.querySelector(errSel),
+        !window.__aaModal() ||
+        Array.from(document.querySelectorAll(errSel)).some(el => el.offsetParent !== null && !/success/i.test(el.innerText || '')),
     { timeout: 12000, polling: 250 }, ERROR_SELECTOR).catch(() => {});
 
     const errors = await getVisibleErrors(page);
     if (errors.length > 0) return { ok: false, errors };
     const confirmed = await page.evaluate(() =>
         /your application was sent|application was sent|application submitted/i.test(document.body.innerText || '') ||
-        !document.querySelector('.jobs-easy-apply-modal'));
+        !window.__aaModal());
     return { ok: confirmed, errors: [] };
 };
 
+// Success popup: old layout has button[aria-label="Dismiss"]; new layout's X / "Done" / "Not now"
+// can differ, so try those in order and fall back to Escape
+const successPopupOpen = (page) => page.evaluate(() =>
+    !!window.__aaModal() || /your application was sent/i.test(
+        Array.from(document.querySelectorAll('dialog[open], [role="dialog"]')).map(d => d.innerText || '').join(' ')));
+
 const dismissSuccessModal = async (page) => {
-    const dismissBtn = await page.$('button[aria-label="Dismiss"]');
-    if (dismissBtn) {
-        await dismissBtn.click().catch(() => {});
-        await sleep(1000);
+    for (let i = 0; i < 3 && await successPopupOpen(page).catch(() => false); i++) {
+        const clicked = await page.evaluate(() => {
+            const scopes = [window.__aaModal(), ...document.querySelectorAll('dialog[open], [role="dialog"]')].filter(Boolean);
+            const buttons = scopes.flatMap(s => Array.from(s.querySelectorAll('button')));
+            const btn = buttons.find(b => /dismiss|close/i.test(b.getAttribute('aria-label') || '')) ||
+                buttons.find(b => /^(done|not now|close)$/i.test((b.innerText || '').trim()));
+            if (btn) btn.click();
+            return !!btn;
+        }).catch(() => false);
+        if (!clicked) await page.keyboard.press('Escape').catch(() => {});
+        await sleep(800);
     }
+    const stillOpen = await successPopupOpen(page).catch(() => false);
+    console.log(stillOpen ? '  ⚠️ Success popup still open (next navigation will clear it).' : '  ✔ Success popup closed.');
 };
 
 // ---------------------------------------------------------------------------
@@ -263,7 +379,7 @@ const attemptApply = async (page, jobInfo, attemptNum, answers, resumePath) => {
     console.log(`  [Attempt ${attemptNum}/${cfg.maxAttempts}] Opening Easy Apply for: ${jobInfo.title}`);
     const shotLabel = (what) => `${what}_${jobInfo.jobId || 'unknown'}`;
 
-    const applyBtn = await page.$('.jobs-apply-button');
+    const applyBtn = await findEasyApplyButton(page);
     if (!applyBtn) return { status: 'failed', reason: 'No Easy Apply button visible', retryable: false };
     await page.evaluate(b => b.click(), applyBtn);
 
@@ -271,6 +387,15 @@ const attemptApply = async (page, jobInfo, attemptNum, answers, resumePath) => {
         await page.waitForSelector(MODAL_SELECTOR, { timeout: 10000 });
     } catch (e) {
         return { status: 'failed', reason: 'Application modal did not open', retryable: true };
+    }
+    // New layout: the dialog opens with only a spinner (hashed classes) — wait for the form's buttons
+    await page.waitForFunction(() => {
+        const m = window.__aaModal();
+        return !!m && (!!m.querySelector('footer button, .artdeco-button--primary') || /no network connection/i.test(m.innerText || ''));
+    }, { timeout: 15000, polling: 250 }).catch(() => {});
+    if (!(await recoverModalNetworkError(page))) {
+        await screenshotOnFailure(page, shotLabel('network'));
+        return { status: 'failed', reason: 'Easy Apply modal showed "No network connection"', retryable: true };
     }
 
     console.log('  Modal opened. Filling form...');
@@ -302,17 +427,27 @@ const attemptApply = async (page, jobInfo, attemptNum, answers, resumePath) => {
 
         // C) Pick the action button
         const buttons = await getActionButtons(page);
-        const submitBtn = buttons.find(b => b.text === 'apply' || b.text.includes('submit application'));
+        const submitBtn = buttons.find(b => b.text === 'apply' || b.text.includes('submit'));
         const reviewBtn = buttons.find(b => b.text.includes('review'));
         const nextBtn = buttons.find(b => b.text.includes('next') || b.text.includes('continue'));
 
         if (submitBtn) {
             await untickFollowCompany(page);
             await page.evaluate(() => {
-                const modal = document.querySelector('.jobs-easy-apply-modal__content, .artdeco-modal__content');
+                const modal = document.querySelector('.jobs-easy-apply-modal__content, .artdeco-modal__content, dialog[open] [data-testid="dialog-content"]');
                 if (modal) modal.scrollTo({ top: modal.scrollHeight, behavior: 'smooth' });
             });
             await sleep(800 + Math.random() * 1200); // "read" the review page
+
+            if (cfg.dryRun) {
+                const followTicked = await page.evaluate(() => Array.from(window.__aaModal().querySelectorAll('input[type="checkbox"]'))
+                    .some(c => c.checked && /follow/i.test(c.parentElement.parentElement.innerText || c.getAttribute('aria-label') || '')));
+                console.log(`  🧪 Follow-company checkbox still ticked: ${followTicked}`);
+                const shot = await screenshotOnFailure(page, shotLabel('dry-run-review'));
+                console.log(`  🧪 DRY RUN: reached "${submitBtn.text}" — discarding instead of submitting.`);
+                await discardModal(page);
+                return { status: 'skipped', reason: 'Dry run: form completed, not submitted', screenshot: shot, retryable: false };
+            }
 
             const submitStart = Date.now();
             console.log('  Submitting application...');
@@ -377,4 +512,4 @@ const attemptApply = async (page, jobInfo, attemptNum, answers, resumePath) => {
     return { status: 'failed', reason: `Exceeded ${cfg.maxSteps} steps`, screenshot: shot, retryable: false };
 };
 
-module.exports = { attemptApply, discardModal, screenshotOnFailure };
+module.exports = { attemptApply, discardModal, screenshotOnFailure, findEasyApplyButton, installPageHelpers };

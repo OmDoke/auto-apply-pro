@@ -1119,6 +1119,8 @@ const ruleBasedMatch = (normalizedQ, userData, context = {}) => {
         normalizedQ.includes('how did you hear') ||
         normalizedQ.includes('where did you find') ||
         normalizedQ.includes('how did you learn about') ||
+        normalizedQ.includes('where did you learn about') ||
+        normalizedQ.includes('where did you hear') ||
         normalizedQ.includes('source of application') ||
         (normalizedQ.includes('how') && normalizedQ.includes('find') && normalizedQ.includes('job'))
     ) {
@@ -1367,10 +1369,13 @@ const getDirectAnswer = (normalizedQ, userData) => {
     if (exactKey !== undefined) return String(data[exactKey]);
 
     // 2. Normalized question CONTAINS a key (e.g. question has extra words around a known key)
-    const containedKey = Object.keys(data).find(k => {
-        const nk = normalizeText(k);
-        return nk.length > 4 && normalizedQ.includes(nk);
-    });
+    // Longest key wins, so "reside in the country" beats "country"
+    const containedKey = Object.keys(data)
+        .filter(k => {
+            const nk = normalizeText(k);
+            return nk.length > 4 && normalizedQ.includes(nk);
+        })
+        .sort((x, y) => normalizeText(y).length - normalizeText(x).length)[0];
     if (containedKey !== undefined) return String(data[containedKey]);
 
     // 3. Key contains the normalized question (shorter question matches longer key)
@@ -1392,10 +1397,30 @@ const getAnswer = async (questionText, userData, context = {}) => {
     const normalized = normalizeText(questionText);
     const llmFirst = process.env.LLM_FIRST === 'true';
 
+    // ── Conflict / restriction questions: answer "No" before any generic "Yes" path can match ──
+    // (non-compete, financial interest, relationships at the company, criminal record)
+    const isConflictQuestion =
+        /non.?compete|bound by .*agreement|financial interest|convicted|criminal|pending charges/.test(normalized) ||
+        (/\b(family|relative|relationship|related)\b/.test(normalized) &&
+            /\b(employee|employees|contractor|contractors|supplier|suppliers|client|clients|competitor|work(s|ing)? (at|for))\b/.test(normalized));
+    if (isConflictQuestion) {
+        const no = String((userData && userData['conflict of interest']) ?? 'No');
+        const opts = context.options || [];
+        if (!opts.length) return no;
+        const match = opts.find(o => o.toLowerCase() === no.toLowerCase());
+        if (match) return match;
+    }
+
     // ── Step 0: Direct answers.json lookup (fastest, zero LLM tokens) ──
     // Check before anything else — if the question or a close variant is already in
     // answers.json, return it instantly without touching LLM or heavy rule chains.
-    const directAnswer = getDirectAnswer(normalized, userData);
+    let directAnswer = getDirectAnswer(normalized, userData);
+    // answers.json salaries are in LPA — scale to rupees when the question asks "in INR" (same as the rule engine)
+    if (directAnswer !== null && /salary|ctc|compensation|package|stipend/.test(normalized) &&
+        /\binr\b|\bin rs\b|rupee/.test(normalized)) {
+        const num = parseFloat(directAnswer);
+        if (!isNaN(num) && num < 100) directAnswer = String(Math.round(num * 100000));
+    }
     if (directAnswer !== null) {
         // Validate against dropdown options if present
         if (context.options && context.options.length > 0) {
@@ -1403,7 +1428,9 @@ const getAnswer = async (questionText, userData, context = {}) => {
             const directLower = directAnswer.toLowerCase();
             // If it's a Yes/No dropdown, check validity
             const isYesNo = lowerOpts.includes('yes') && lowerOpts.includes('no') && context.options.length <= 3;
-            if (!isYesNo || lowerOpts.includes(directLower)) {
+            // Other dropdowns: the answer must match an option (e.g. a phone number is not a country-code option)
+            const matchesOption = lowerOpts.some(o => o === directLower || o.includes(directLower) || directLower.includes(o));
+            if (isYesNo ? lowerOpts.includes(directLower) : matchesOption) {
                 return directAnswer;
             }
             // Fall through to rules if the direct answer isn't a valid option

@@ -34,6 +34,8 @@ module.exports = {
     // Base resume — regenerated from resumeData.js at startup, never overwritten per job
     baseResumePath:  path.join(DATA_DIR, resumeFileName),
     chromePath:      env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    // e.g. http://localhost:9222 — attach to your own Chrome started with --remote-debugging-port
+    cdpUrl:          env.LINKEDIN_CDP_URL || '',
 
     // ── Search ──────────────────────────────────────────────────────────────
     // Comma-separated list → one search per title
@@ -41,6 +43,8 @@ module.exports = {
     location:         env.FRONTEND_LOCATION || env.JOB_LOCATION || env.LOCATION || 'Remote',
     // LinkedIn f_E codes: 1=Internship 2=Entry 3=Associate 4=Mid-Senior 5=Director 6=Executive
     experienceLevels: env.LINKEDIN_EXPERIENCE_LEVELS || '1,2',
+    // Result pages (25 jobs each) to walk per job title
+    maxSearchPages:   int(env.LINKEDIN_MAX_SEARCH_PAGES, 5),
 
     // ── Screening ───────────────────────────────────────────────────────────
     screening: {
@@ -73,5 +77,7 @@ module.exports = {
     strictAnswers:        bool(env.LINKEDIN_STRICT_ANSWERS, true),
     tailorResume:         bool(env.LINKEDIN_TAILOR_RESUME, true),
     followCompany:        bool(env.LINKEDIN_FOLLOW_COMPANY, false),
+    // true → walk the whole form but discard it instead of clicking Submit (for testing)
+    dryRun:               bool(env.LINKEDIN_DRY_RUN, false),
     fallbackResumeName:   env.RESUME_NAME || '',
 };
