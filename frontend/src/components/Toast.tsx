@@ -39,7 +39,7 @@ function Toast({ toast, removeToast }: { toast: ToastMessage, removeToast: (id: 
   const displayMessage = toast.message.replace(/^\[.*?\]\s*/, '');
 
   return (
-    <div className={`flex items-start gap-3 p-4 rounded-xl border bg-slate-950/90 backdrop-blur-md pointer-events-auto shadow-2xl min-w-[300px] max-w-[400px] ${bgStyles[toast.type]} animate-[slideInRight_0.3s_ease-out]`}>
+    <div className={`flex items-start gap-3 p-4 rounded-xl border bg-slate-950/90 backdrop-blur-md pointer-events-auto shadow-2xl min-w-[300px] max-w-[400px] ${bgStyles[toast.type]} anim-toast`}>
       <div className="shrink-0 mt-0.5">{icons[toast.type]}</div>
       <p className="text-sm font-medium text-slate-200 flex-1 break-words leading-relaxed">{displayMessage}</p>
       <button onClick={() => removeToast(toast.id)} className="shrink-0 text-slate-500 hover:text-slate-300 transition-colors p-1 -mr-2 -mt-1 rounded-lg hover:bg-white/5">

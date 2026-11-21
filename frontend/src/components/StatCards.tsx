@@ -17,9 +17,9 @@ export function StatCard({ icon: Icon, label, value, sub, color, delay = 0 }: St
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${color}`}>
         <Icon className="w-5 h-5" />
       </div>
-      <p className="text-3xl font-bold text-slate-100 tracking-tight">{value}</p>
-      <p className="text-xs font-semibold text-slate-400 mt-0.5">{label}</p>
-      {sub && <p className="text-[11px] text-slate-600 mt-0.5">{sub}</p>}
+      <p className="text-3xl font-bold text-white tracking-tight">{value}</p>
+      <p className="text-xs font-semibold text-slate-300 mt-0.5">{label}</p>
+      {sub && <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -52,7 +52,7 @@ export function StatCards({
         label="LinkedIn Applied"
         value={linkedInApplied ? linkedInApplied.total : '–'}
         sub={linkedInApplied ? `${linkedInApplied.today}/${linkedInApplied.dailyLimit} today · confirmed only` : 'Backend offline'}
-        color="bg-sky-500/15 text-sky-400"
+        color="bg-white/5 text-slate-300"
         delay={0}
       />
       <StatCard 
@@ -60,7 +60,7 @@ export function StatCards({
         label="Active Agents"  
         value={activeCount}     
         sub={isRunning ? runningAgentName : 'None running'} 
-        color="bg-indigo-500/15 text-indigo-400"  
+        color={isRunning ? "bg-indigo-500/15 text-indigo-400" : "bg-white/5 text-slate-400"}  
         delay={0}   
       />
       <StatCard 
@@ -68,7 +68,7 @@ export function StatCards({
         label="Completed"      
         value={completedCount}  
         sub={`of ${totalActive} agents`}                            
-        color="bg-emerald-500/15 text-emerald-400" 
+        color="bg-white/5 text-slate-400" 
         delay={60}  
       />
       <StatCard 
@@ -76,7 +76,7 @@ export function StatCards({
         label="Review Queue"   
         value={failedCount}     
         sub={failedCount > 0 ? 'Needs manual apply' : 'All clear'}  
-        color={failedCount > 0 ? 'bg-amber-500/15 text-amber-400' : 'bg-slate-800 text-slate-600'} 
+        color={failedCount > 0 ? 'bg-amber-500/15 text-amber-400' : 'bg-white/5 text-slate-400'} 
         delay={120} 
       />
       <StatCard 
@@ -84,7 +84,7 @@ export function StatCards({
         label="Applied Jobs"     
         value={logCount} 
         sub="This session"                                        
-        color="bg-violet-500/15 text-violet-400"   
+        color="bg-white/5 text-slate-400"   
         delay={180} 
       />
     </div>

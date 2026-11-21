@@ -92,7 +92,7 @@ export default function AgentDashboard({
           <div className="flex items-start justify-between anim-fade-up">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-3xl font-bold text-grd-indigo tracking-tight">Dashboard</h1>
+                <h1 className="text-3xl font-bold text-white tracking-tight">Dashboard</h1>
                 {isRunning && (
                   <span className="badge badge-running ml-1">
                     <span className="live-dot" />Live
@@ -108,7 +108,7 @@ export default function AgentDashboard({
 
             <div className="flex items-center gap-2.5">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600 pointer-events-none" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
                 <input
                   type="text"
                   value={prefs.jobTitle}
@@ -118,7 +118,7 @@ export default function AgentDashboard({
                 />
               </div>
               <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600 pointer-events-none" />
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
                 <input
                   type="text"
                   value={prefs.location}
@@ -176,7 +176,7 @@ export default function AgentDashboard({
                     placeholder="React, TypeScript, Node.js, Python..."
                     className="input w-full"
                   />
-                  <p className="text-xs text-slate-600 mt-1">
+                  <p className="text-xs text-slate-500 mt-1">
                     Used by Gemini to score job descriptions before applying
                   </p>
                 </div>
@@ -201,7 +201,7 @@ export default function AgentDashboard({
                     onChange={e => setPrefs({ ...prefs, minMatchScore: Number(e.target.value) })}
                     className="w-full accent-indigo-500 cursor-pointer"
                   />
-                  <div className="flex justify-between text-xs text-slate-600 mt-1">
+                  <div className="flex justify-between text-xs text-slate-500 mt-1">
                     <span>0 (off)</span>
                     <span>20 (lenient)</span>
                     <span>60 (balanced)</span>
@@ -305,7 +305,7 @@ export default function AgentDashboard({
               <div className="progress-track">
                 <div className="progress-fill" style={{ width: `${progressPct}%` }} />
               </div>
-              <p className="text-xs text-slate-600 mt-2">{completedCount} of {totalActive} agents completed</p>
+              <p className="text-xs text-slate-500 mt-2">{completedCount} of {totalActive} agents completed</p>
             </div>
           )}
 

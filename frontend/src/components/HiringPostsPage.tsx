@@ -84,7 +84,7 @@ export default function HiringPostsPage({ onBack }: { onBack: () => void }) {
             </button>
             <div className="w-px h-6 bg-white/10" />
             <div>
-              <h1 className="text-lg font-bold text-grd-emerald leading-tight flex items-center gap-2">
+              <h1 className="text-lg font-bold text-white leading-tight flex items-center gap-2">
                 <Users className="w-5 h-5" />
                 Hiring Posts
               </h1>
@@ -138,8 +138,8 @@ export default function HiringPostsPage({ onBack }: { onBack: () => void }) {
                     onChange={e => setEmailsOnly(e.target.checked)} 
                     className="sr-only peer"
                   />
-                  <div className="w-8 h-4 bg-white/5 border border-white/10 rounded-full peer peer-checked:bg-emerald-500/20 peer-checked:border-emerald-500/40 transition-all"></div>
-                  <div className="absolute left-1 top-1 w-2 h-2 bg-slate-600 rounded-full peer-checked:left-5 peer-checked:bg-emerald-400 transition-all"></div>
+                  <div className="w-8 h-4 bg-white/5 border border-white/10 rounded-full peer peer-checked:bg-emerald-500/20 peer-checked:border-emerald-500/40 transition-colors"></div>
+                  <div className="absolute left-1 top-1 w-2 h-2 bg-slate-600 rounded-full peer-checked:translate-x-4 peer-checked:bg-emerald-400 transition-[transform,background-color] duration-200"></div>
                 </div>
                 Emails Only
               </label>
@@ -152,8 +152,8 @@ export default function HiringPostsPage({ onBack }: { onBack: () => void }) {
                     onChange={e => setWithPhone(e.target.checked)} 
                     className="sr-only peer"
                   />
-                  <div className="w-8 h-4 bg-white/5 border border-white/10 rounded-full peer peer-checked:bg-blue-500/20 peer-checked:border-blue-500/40 transition-all"></div>
-                  <div className="absolute left-1 top-1 w-2 h-2 bg-slate-600 rounded-full peer-checked:left-5 peer-checked:bg-blue-400 transition-all"></div>
+                  <div className="w-8 h-4 bg-white/5 border border-white/10 rounded-full peer peer-checked:bg-blue-500/20 peer-checked:border-blue-500/40 transition-colors"></div>
+                  <div className="absolute left-1 top-1 w-2 h-2 bg-slate-600 rounded-full peer-checked:translate-x-4 peer-checked:bg-blue-400 transition-[transform,background-color] duration-200"></div>
                 </div>
                 With Phone
               </label>
@@ -197,7 +197,7 @@ export default function HiringPostsPage({ onBack }: { onBack: () => void }) {
             {filteredPosts.map((post, idx) => (
               <div 
                 key={idx} 
-                className="card p-6 hover:border-white/20 transition-all duration-300 anim-fade-up"
+                className="card p-6 hover:border-white/20 transition-colors duration-200 anim-fade-up"
                 style={{ animationDelay: `${Math.min(idx * 50, 500)}ms` }}
               >
                 <div className="flex flex-col md:flex-row gap-6">
@@ -256,7 +256,7 @@ export default function HiringPostsPage({ onBack }: { onBack: () => void }) {
                     {/* Content Snippet */}
                     <div className="relative group/text">
                       <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 text-sm text-slate-300 leading-relaxed group-hover/text:border-white/10 transition-colors">
-                        <p className="whitespace-pre-wrap line-clamp-4 group-hover/text:line-clamp-none transition-all duration-300">
+                        <p className="whitespace-pre-wrap line-clamp-4 group-hover/text:line-clamp-none">
                           {post.fullText || post.snippet}
                         </p>
                       </div>
@@ -266,12 +266,12 @@ export default function HiringPostsPage({ onBack }: { onBack: () => void }) {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
                       <div className="flex flex-wrap gap-2">
                         {post.emails?.map(e => (
-                          <a key={e} href={`mailto:${e}`} className="btn-link text-emerald-400/80 hover:text-emerald-300 bg-emerald-500/5 px-2.5 py-1.5 rounded-lg border border-emerald-500/10 hover:border-emerald-500/20 transition-all text-xs">
+                          <a key={e} href={`mailto:${e}`} className="btn-link text-emerald-400/80 hover:text-emerald-300 bg-emerald-500/5 px-2.5 py-1.5 rounded-lg border border-emerald-500/10 hover:border-emerald-500/20 transition-colors text-xs">
                             <Mail className="w-3.5 h-3.5" /> {e}
                           </a>
                         ))}
                         {post.phones?.map(p => (
-                          <a key={p} href={`tel:${p}`} className="btn-link text-blue-400/80 hover:text-blue-300 bg-blue-500/5 px-2.5 py-1.5 rounded-lg border border-blue-500/10 hover:border-blue-500/20 transition-all text-xs">
+                          <a key={p} href={`tel:${p}`} className="btn-link text-blue-400/80 hover:text-blue-300 bg-blue-500/5 px-2.5 py-1.5 rounded-lg border border-blue-500/10 hover:border-blue-500/20 transition-colors text-xs">
                             <Phone className="w-3.5 h-3.5" /> {p}
                           </a>
                         ))}

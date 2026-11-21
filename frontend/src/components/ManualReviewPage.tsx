@@ -39,7 +39,7 @@ export default function ManualReviewPage({ onBack }: { onBack: () => void }) {
             </button>
             <div className="w-px h-6 bg-white/10" />
             <div>
-              <h1 className="text-lg font-bold text-grd-amber leading-tight">Manual Review Queue</h1>
+              <h1 className="text-lg font-bold text-white leading-tight">Manual Review Queue</h1>
               <p className="text-slate-500 text-xs">Jobs the agent couldn't auto-apply to</p>
             </div>
           </div>

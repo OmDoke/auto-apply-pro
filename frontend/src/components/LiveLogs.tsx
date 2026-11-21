@@ -19,7 +19,7 @@ function LogLine({ log, idx }: LogLineProps) {
       isWarning ? 'text-amber-400'  :
       isInfo    ? 'text-indigo-400' : 'text-slate-500'
     }`}>
-      <span className="text-slate-700 shrink-0 select-none w-7 text-right">{idx + 1}</span>
+      <span className="text-slate-600 shrink-0 select-none w-7 text-right">{idx + 1}</span>
       <span className="flex-1 break-all">{log}</span>
     </div>
   );
@@ -93,7 +93,7 @@ export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: 
               <span className="live-dot" />Live
             </span>
           )}
-          <ChevronRight className={`w-4 h-4 text-slate-600 transition-transform duration-200 ${logsOpen ? 'rotate-90' : ''}`} />
+          <ChevronRight className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${logsOpen ? 'rotate-90' : ''}`} />
         </div>
       </button>
 
@@ -135,10 +135,10 @@ export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: 
           {logs.length === 0 ? (
             <div className="empty-state py-12">
               <div className="empty-icon">
-                <Terminal className="w-7 h-7 text-slate-600" />
+                <Terminal className="w-7 h-7 text-slate-500" />
               </div>
-              <p className="text-slate-600 text-sm font-medium">No logs yet</p>
-              <p className="text-slate-700 text-xs">Start an agent to see live output here</p>
+              <p className="text-slate-500 text-sm font-medium">No logs yet</p>
+              <p className="text-slate-600 text-xs">Start an agent to see live output here</p>
             </div>
           ) : (
             <div>
@@ -146,7 +146,7 @@ export function LiveLogs({ logs, isRunning, logsOpen, setLogsOpen, logEndRef }: 
                 <LogLine key={`${i}-${log.slice(0, 12)}`} log={log} idx={i} />
               ))}
               {isRunning && (
-                <div className="log-line text-slate-600 cursor-blink mt-1">›</div>
+                <div className="log-line text-slate-500 cursor-blink mt-1">›</div>
               )}
             </div>
           )}

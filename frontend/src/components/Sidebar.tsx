@@ -32,14 +32,14 @@ export function Sidebar({ failedCount, onShowManualReview, onShowHiringPosts, on
       {/* Status Banner */}
       <div className="px-4 py-4">
         <p className="section-label mb-2.5">System Status</p>
-        <div className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-xs font-semibold transition-all duration-300 ${
+        <div className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-xs font-semibold transition-colors duration-200 ${
           isRunning
             ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/25'
             : status === 'Success'
             ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25'
             : status === 'Failed'
             ? 'bg-rose-500/10 text-rose-300 border-rose-500/25'
-            : 'bg-white/5 text-slate-500 border-white/8'
+            : 'bg-white/5 text-slate-500 border-white/10'
         }`}>
           {isRunning && <span className="live-dot" />}
           {!isRunning && status !== 'Running' && (
@@ -64,7 +64,7 @@ export function Sidebar({ failedCount, onShowManualReview, onShowHiringPosts, on
         <div className="nav-item" onClick={onShowHiringPosts}>
           <Briefcase className="w-4 h-4 shrink-0" />
           <span>Hiring Posts</span>
-          <span className="ml-auto text-[10px] text-slate-700 font-medium">Scraper</span>
+          <span className="ml-auto text-[10px] text-slate-600 font-medium">Scraper</span>
         </div>
 
         <div className="nav-item" onClick={onShowManualReview}>
@@ -87,9 +87,9 @@ export function Sidebar({ failedCount, onShowManualReview, onShowHiringPosts, on
       <div className="divider mx-4" />
       <div className="px-5 py-4 flex items-center gap-2">
         <div className="w-6 h-6 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center">
-          <Activity className="w-3.5 h-3.5 text-slate-600" />
+          <Activity className="w-3.5 h-3.5 text-slate-500" />
         </div>
-        <span className="text-xs text-slate-600 font-medium">Production Build</span>
+        <span className="text-xs text-slate-500 font-medium">Production Build</span>
       </div>
     </nav>
   );

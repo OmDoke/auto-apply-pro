@@ -132,7 +132,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/80 backdrop-blur-sm anim-fade-in">
-      <div className="w-full max-w-4xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-4xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] anim-modal">
         
         {/* Header */}
         <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
@@ -197,7 +197,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             ) : profile ? (
               <div className="space-y-6">
                 {activeTab === 'contact' && (
-                  <div className="space-y-4 anim-fade-up">
+                  <div className="space-y-4">
                     <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider mb-4">Personal Details</h3>
                     <div className="grid grid-cols-2 gap-4">
                       <Field label="First Name" value={profile.contact_info.first_name} onChange={v => setProfile({...profile, contact_info: {...profile.contact_info, first_name: v}})} />
@@ -214,7 +214,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 )}
 
                 {activeTab === 'experience' && (
-                  <div className="space-y-4 anim-fade-up">
+                  <div className="space-y-4">
                     <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider mb-4">Professional Background</h3>
                     <Field label="Total Years" value={profile.experience.total_years} onChange={v => setProfile({...profile, experience: {...profile.experience, total_years: parseInt(v)}})} type="number" />
                     <Field label="Recent Role" value={profile.experience.recent_role} onChange={v => setProfile({...profile, experience: {...profile.experience, recent_role: v}})} />
@@ -231,7 +231,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 )}
 
                 {activeTab === 'education' && (
-                  <div className="space-y-4 anim-fade-up">
+                  <div className="space-y-4">
                     <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider mb-4">Education</h3>
                     <Field label="Degree" value={profile.education.degree} onChange={v => setProfile({...profile, education: {...profile.education, degree: v}})} />
                     <Field label="Major" value={profile.education.major} onChange={v => setProfile({...profile, education: {...profile.education, major: v}})} />
@@ -241,7 +241,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 )}
 
                 {activeTab === 'salary' && (
-                  <div className="space-y-4 anim-fade-up">
+                  <div className="space-y-4">
                     <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider mb-4">Preferences</h3>
                     <div className="grid grid-cols-2 gap-4">
                       <Field label="Target Salary" value={profile.salary_expectations.target} onChange={v => setProfile({...profile, salary_expectations: {...profile.salary_expectations, target: v}})} />
@@ -263,7 +263,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 )}
 
                 {activeTab === 'qa_answers' && answers && (
-                  <div className="space-y-4 anim-fade-up">
+                  <div className="space-y-4">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider">QA Database</h3>
                       <span className="text-xs text-slate-500 font-medium">{Object.keys(answers).length} records</span>
@@ -308,7 +308,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           />
                           <button 
                             onClick={() => handleRemoveQA(key)}
-                            className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-all shrink-0"
+                            className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-rose-500 hover:bg-rose-500/10 transition-opacity shrink-0"
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
@@ -348,7 +348,7 @@ function TabButton({ active, onClick, icon: Icon, label }: any) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 ${
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-colors duration-150 ${
         active 
           ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/20' 
           : 'text-slate-500 hover:bg-white/5 hover:text-slate-300 border border-transparent'
